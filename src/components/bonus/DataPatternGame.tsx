@@ -9,7 +9,7 @@ interface DataPatternGameProps {
   currentChips: number;
 }
 
-const DataPatternGame: React.FC<DataPatternGameProps> = ({ onBack, onSelectBonusBet, onChipUpdate, selectedBet, result, currentChips }) => {
+const DataPatternGame: React.FC<DataPatternGameProps> = ({ onBack, onChipUpdate, currentChips }) => {
   const [pattern, setPattern] = useState('');
   const [answer, setAnswer] = useState('');
   const [userInput, setUserInput] = useState('');

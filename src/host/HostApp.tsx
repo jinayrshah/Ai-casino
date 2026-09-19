@@ -1,377 +1,366 @@
-// src/host/HostApp.tsx
 import { useState, useEffect, useRef } from 'react';
 import { network_manager } from '../services/network';
 
 interface ChatMessage {
   id: string;
   text: string;
-  sender: 'host' | 'player';
+  sender: 'host' | 'player' | 'system';
   timestamp: Date;
   playerId?: string;
 }
 
+interface PlayerState {
+  username: string;
+  claimedBy: string | null;
+  claimedById: string | null;
+  messages: ChatMessage[];
+  unread: boolean;
+}
+
 export default function HostApp() {
+  const [operatorName, setOperatorName] = useState('');
+  const [hasJoined, setHasJoined] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [input, setInput] = useState('');
   const [connectionStatus, setConnectionStatus] = useState('Connecting to server...');
-  const [isLoading, setIsLoading] = useState(true);
-  const [connectedPlayers, setConnectedPlayers] = useState<string[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  
+  // Track all players independently
+  const [players, setPlayers] = useState<Record<string, PlayerState>>({});
+  const [activePlayerId, setActivePlayerId] = useState<string | null>(null);
+  const [input, setInput] = useState('');
+  
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const localIdRef = useRef<string>('');
 
   useEffect(() => {
+    if (!hasJoined) return;
+    
+    localIdRef.current = network_manager.get_local_id() || `host-${Date.now()}`;
+    
     const handleConnection = (connected: boolean, message: string) => {
-      console.log('Host connection status:', connected, message);
       setIsConnected(connected);
       setConnectionStatus(connected ? 'Connected to server!' : message || 'Connecting...');
       
       if (connected) {
-        // Register as host once connected
-        console.log('Sending register-host message');
-        const registerMsg = {
-          type: 'register-host',
-          clientId: network_manager.get_local_id(),
-          timestamp: Date.now()
-        };
-        
-        // Send the registration message directly through the WebSocket
         const ws = (network_manager as any).ws;
         if (ws && ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify(registerMsg));
-          console.log('Register-host message sent');
-        } else {
-          console.error('WebSocket not ready for sending register-host message');
+          ws.send(JSON.stringify({
+            type: 'register-host',
+            clientId: localIdRef.current,
+            hostName: operatorName,
+            timestamp: Date.now()
+          }));
         }
       }
     };
 
     const handleMessage = (msg: any) => {
-      console.log('Host received message:', msg);
-      
       switch (msg.type) {
-        case 'host-registered':
-          setConnectionStatus('✅ Host registered - Waiting for players...');
+        case 'player-list':
+          setPlayers(prev => {
+            const next = { ...prev };
+            msg.players.forEach((p: any) => {
+              if (!next[p.id]) {
+                next[p.id] = {
+                  username: p.username,
+                  claimedBy: p.claimedBy,
+                  claimedById: p.claimedById,
+                  messages: [],
+                  unread: false
+                };
+              }
+            });
+            return next;
+          });
           setIsLoading(false);
-          addMessage('System', 'You are now the host! Players can connect to chat.', 'system');
           break;
           
         case 'player-joined':
-          setConnectedPlayers(prev => [...prev, msg.clientId]);
-          addMessage('System', `🎮 Player ${msg.clientId} joined the chat`, 'system');
+          setPlayers(prev => ({
+            ...prev,
+            [msg.clientId]: {
+              username: msg.username,
+              claimedBy: null,
+              claimedById: null,
+              messages: [],
+              unread: false
+            }
+          }));
           break;
           
         case 'player-left':
-          setConnectedPlayers(prev => prev.filter(id => id !== msg.clientId));
-          addMessage('System', `🚪 Player ${msg.clientId} left the chat`, 'system');
+          setPlayers(prev => {
+            const next = { ...prev };
+            delete next[msg.clientId];
+            if (activePlayerId === msg.clientId) setActivePlayerId(null);
+            return next;
+          });
+          break;
+          
+        case 'player-claimed':
+          setPlayers(prev => {
+            if (!prev[msg.playerId]) return prev;
+            return {
+              ...prev,
+              [msg.playerId]: {
+                ...prev[msg.playerId],
+                claimedBy: msg.hostName,
+                claimedById: msg.hostId
+              }
+            };
+          });
           break;
           
         case 'chat':
-          if (msg.senderId !== 'host') { // Only show player messages
-            const newMessage: ChatMessage = {
-              id: Date.now().toString(),
-              text: msg.content,
-              sender: 'player',
-              timestamp: new Date(msg.timestamp),
-              playerId: msg.senderId
-            };
-            setMessages(prev => [...prev, newMessage]);
+          if (msg.senderId !== 'host') {
+            const playerId = msg.senderId;
+            setPlayers(prev => {
+              if (!prev[playerId]) return prev; // Ignore if player unknown
+              return {
+                ...prev,
+                [playerId]: {
+                  ...prev[playerId],
+                  messages: [...prev[playerId].messages, {
+                    id: Date.now().toString() + Math.random(),
+                    text: msg.content,
+                    sender: 'player',
+                    timestamp: new Date(msg.timestamp),
+                  }],
+                  unread: activePlayerId !== playerId
+                }
+              };
+            });
           }
           break;
           
-        case 'connected':
-          addMessage('System', msg.message, 'system');
-          break;
-          
         case 'error':
-          addMessage('System', `❌ ${msg.message}`, 'system');
+          if (msg.message.includes('Maximum 2 operators')) {
+             setHasJoined(false);
+             alert(msg.message);
+          } else {
+             console.error('Server error:', msg.message);
+          }
           break;
       }
     };
 
-    // Initialize host connection
-    const initializeHost = async () => {
-      try {
-        setIsLoading(true);
-        
-        // Set up network callbacks
-        network_manager.connection_callback = handleConnection;
-        network_manager.message_callback = handleMessage;
+    setIsLoading(true);
+    network_manager.connection_callback = handleConnection;
+    network_manager.message_callback = handleMessage;
+    network_manager.connect_to_host(import.meta.env.VITE_WS_URL || `ws://${window.location.hostname}:8080`);
 
-        // Connect to WebSocket server (not start a server)
-        console.log('Connecting to WebSocket server as host...');
-        await network_manager.connect_to_host('ws://localhost:8080');
-        
-      } catch (error) {
-        console.error('Failed to connect as host:', error);
-        setConnectionStatus('❌ Failed to connect to server. Make sure the WebSocket server is running.');
-        setIsLoading(false);
-        
-        addMessage('System', 'Error: Could not connect to WebSocket server. Run "npm run host" first.', 'system');
-      }
-    };
-
-    initializeHost();
-
-    // Cleanup on unmount
     return () => {
-      console.log('Cleaning up host...');
       network_manager.disconnect();
       network_manager.connection_callback = null;
       network_manager.message_callback = null;
     };
-  }, []);
+  }, [hasJoined, operatorName]);
 
-  // Auto-scroll to bottom of messages
+  // Scroll to bottom when messages change
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, [players, activePlayerId]);
 
-  const addMessage = (sender: string, text: string, type: 'host' | 'player' | 'system') => {
-    const newMessage: ChatMessage = {
-      id: Date.now().toString(),
-      text: text,
-      sender: type as 'host' | 'player',
-      timestamp: new Date()
-    };
-    setMessages(prev => [...prev, newMessage]);
-  };
-
-  const sendMessage = () => {
-    if (!input.trim() || !isConnected) return;
-    
-    // Create host message
-    const hostMessage: ChatMessage = {
-      id: Date.now().toString(),
-      text: input,
-      sender: 'host',
-      timestamp: new Date()
-    };
-    
-    // Add to local messages
-    setMessages(prev => [...prev, hostMessage]);
-    
-    // Send via network
-    network_manager.send_chat_message(input);
-    
-    // Clear input
-    setInput('');
-  };
-
-  const handleKeyPress = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      sendMessage();
+  const claimPlayer = (playerId: string) => {
+    const ws = (network_manager as any).ws;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        type: 'claim-player',
+        playerId: playerId,
+        timestamp: Date.now()
+      }));
     }
   };
 
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text).then(() => {
-      // Show temporary notification
-      const originalStatus = connectionStatus;
-      setConnectionStatus('✅ Copied to clipboard!');
-      setTimeout(() => setConnectionStatus(originalStatus), 2000);
+  const sendMessage = () => {
+    if (!input.trim() || !isConnected || !activePlayerId) return;
+    
+    const activePlayer = players[activePlayerId];
+    if (activePlayer.claimedById !== localIdRef.current) return;
+
+    // Add to local state instantly
+    setPlayers(prev => ({
+      ...prev,
+      [activePlayerId]: {
+        ...prev[activePlayerId],
+        messages: [...prev[activePlayerId].messages, {
+          id: Date.now().toString(),
+          text: input,
+          sender: 'host',
+          timestamp: new Date()
+        }]
+      }
+    }));
+    
+    // Send via network (Private message)
+    const ws = (network_manager as any).ws;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        type: 'private-message',
+        targetPlayerId: activePlayerId,
+        content: input,
+        timestamp: Date.now()
+      }));
+    }
+    
+    setInput('');
+  };
+
+  const selectPlayer = (id: string) => {
+    setActivePlayerId(id);
+    setPlayers(prev => {
+      if (!prev[id]) return prev;
+      return {
+        ...prev,
+        [id]: { ...prev[id], unread: false }
+      };
     });
   };
 
+  if (!hasJoined) {
+    return (
+      <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
+        <div className="bg-slate-800 p-8 rounded-xl max-w-md w-full border border-purple-500/30">
+          <h2 className="text-2xl font-bold text-white mb-6 text-center">Operator Login</h2>
+          <input
+            type="text"
+            value={operatorName}
+            onChange={(e) => setOperatorName(e.target.value)}
+            placeholder="Enter your name (e.g. Alice)"
+            className="w-full bg-slate-700 text-white border border-slate-600 rounded-lg p-3 mb-4"
+          />
+          <button
+            onClick={() => {
+              if (operatorName.trim().length > 0) setHasJoined(true);
+            }}
+            disabled={operatorName.trim().length === 0}
+            className="w-full bg-purple-600 hover:bg-purple-700 text-white py-3 rounded-lg font-bold disabled:opacity-50"
+          >
+            Join Inbox
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const activePlayer = activePlayerId ? players[activePlayerId] : null;
+  const isClaimedByMe = activePlayer?.claimedById === localIdRef.current;
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 text-white p-6">
-      <div className="max-w-6xl mx-auto">
-        <div className="text-center mb-8">
-          <h1 className="text-4xl font-black mb-2">🎮 Turing Test Host</h1>
-          <p className="text-purple-300">Chat with players in real-time</p>
-        </div>
-        
-        {/* Connection Status */}
-        <div className="bg-slate-800/50 backdrop-blur-md rounded-xl p-6 mb-6 border border-purple-900/50">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center">
-              <div className={`w-3 h-3 rounded-full mr-3 ${isConnected ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></div>
-              <span className="text-lg font-semibold">
-                {isConnected ? 'Connected to Server' : 'Disconnected'}
-              </span>
-            </div>
-            <div className="text-sm text-slate-400">
-              Players: {connectedPlayers.length}
-            </div>
+    <div className="min-h-screen bg-slate-900 text-white flex h-screen overflow-hidden">
+      {/* LEFT SIDEBAR */}
+      <div className="w-80 bg-slate-800 border-r border-slate-700 flex flex-col">
+        <div className="p-4 bg-slate-800 border-b border-slate-700 flex justify-between items-center">
+          <h2 className="font-bold text-lg text-purple-400">Players ({Object.keys(players).length})</h2>
+          <div className="text-xs text-slate-400">
+            {isConnected ? <span className="text-green-500">● Online</span> : <span className="text-red-500">● Offline</span>}
           </div>
-          
-          <div className="p-4 bg-slate-900/50 rounded-lg">
-            <p className="text-slate-300">{connectionStatus}</p>
-            {isLoading && (
-              <div className="flex items-center justify-center mt-2">
-                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-purple-400 mr-2"></div>
-                <span className="text-sm text-purple-300">Connecting...</span>
+        </div>
+        <div className="flex-1 overflow-y-auto p-2">
+          {Object.keys(players).length === 0 ? (
+            <div className="text-center text-slate-500 mt-10">No players connected</div>
+          ) : (
+            Object.entries(players).map(([id, p]) => (
+              <div 
+                key={id}
+                onClick={() => selectPlayer(id)}
+                className={`p-3 rounded-lg mb-2 cursor-pointer transition-colors ${
+                  activePlayerId === id ? 'bg-purple-900/50 border border-purple-500' : 'bg-slate-700/50 hover:bg-slate-700'
+                }`}
+              >
+                <div className="flex justify-between items-center mb-1">
+                  <div className="font-semibold">{p.username}</div>
+                  {p.unread && <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse" />}
+                </div>
+                <div className="text-xs text-slate-400">
+                  {p.claimedById === localIdRef.current ? (
+                    <span className="text-green-400">Claimed by You</span>
+                  ) : p.claimedBy ? (
+                    <span className="text-orange-400">Claimed by {p.claimedBy}</span>
+                  ) : (
+                    <span>Waiting for Host</span>
+                  )}
+                </div>
               </div>
-            )}
-          </div>
+            ))
+          )}
         </div>
+      </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-          {/* Chat Container */}
-          <div className="lg:col-span-3">
-            <div className="bg-slate-800/50 backdrop-blur-md rounded-xl p-6 border border-purple-900/50">
-              <h2 className="text-xl font-bold mb-4">Chat Room</h2>
-              
-              {/* Messages */}
-              <div className="bg-slate-900/50 rounded-lg p-4 h-96 overflow-y-auto mb-4">
-                {messages.length === 0 ? (
-                  <div className="flex items-center justify-center h-full text-slate-400">
-                    <div className="text-center">
-                      <div className="text-4xl mb-2">💬</div>
-                      <p>No messages yet</p>
-                      <p className="text-sm mt-1">Chat will appear here when players connect</p>
-                    </div>
-                  </div>
-                ) : (
-                  messages.map((msg) => (
-                    <div 
-                      key={msg.id} 
-                      className={`mb-3 flex ${msg.sender === 'host' ? 'justify-end' : 'justify-start'}`}
-                    >
-                      <div 
-                        className={`max-w-[80%] rounded-2xl p-4 ${
-                          msg.sender === 'host' 
-                            ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-br-none' 
-                            : msg.sender === 'player'
-                            ? 'bg-slate-700 text-white rounded-bl-none'
-                            : 'bg-slate-600 text-slate-200 rounded'
-                        } backdrop-blur-sm border border-white/10`}
-                      >
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className="font-semibold text-sm">
-                            {msg.sender === 'host' ? 'You' : msg.sender === 'player' ? `Player ${msg.playerId?.substring(0, 6)}` : 'System'}
-                          </span>
-                          <span className="text-xs opacity-70">
-                            {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                          </span>
-                        </div>
-                        <p className="text-white break-words">{msg.text}</p>
-                      </div>
-                    </div>
-                  ))
-                )}
-                <div ref={messagesEndRef} />
+      {/* RIGHT PANEL: CHAT */}
+      <div className="flex-1 flex flex-col bg-slate-900">
+        {!activePlayerId || !activePlayer ? (
+          <div className="flex-1 flex items-center justify-center text-slate-500">
+            Select a player from the sidebar to chat
+          </div>
+        ) : (
+          <>
+            {/* Chat Header */}
+            <div className="p-4 bg-slate-800 border-b border-slate-700 flex justify-between items-center">
+              <div>
+                <h2 className="font-bold text-xl">{activePlayer.username}</h2>
+                <div className="text-sm text-slate-400">
+                  {activePlayer.claimedById === localIdRef.current 
+                    ? 'You are chatting with this player' 
+                    : activePlayer.claimedBy 
+                    ? `Claimed by ${activePlayer.claimedBy}` 
+                    : 'Unclaimed'}
+                </div>
               </div>
-              
-              {/* Input */}
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  onKeyPress={handleKeyPress}
-                  placeholder={isConnected ? "Type your message as host..." : "Connect to server to chat..."}
-                  className="flex-1 bg-slate-700 border border-slate-600 text-white px-4 py-3 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                  disabled={!isConnected}
-                />
+              {!activePlayer.claimedBy && (
                 <button 
-                  onClick={sendMessage}
-                  disabled={!input.trim() || !isConnected}
-                  className="bg-purple-600 hover:bg-purple-700 px-6 py-3 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+                  onClick={() => claimPlayer(activePlayerId)}
+                  className="bg-green-600 hover:bg-green-700 px-4 py-2 rounded font-bold"
                 >
-                  Send
+                  Claim Player
                 </button>
-              </div>
+              )}
             </div>
-          </div>
 
-          {/* Connection Info */}
-          <div className="space-y-6">
-            <div className="bg-slate-800/50 backdrop-blur-md rounded-xl p-6 border border-purple-900/50">
-              <h2 className="text-xl font-bold mb-4">Server Info</h2>
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-slate-300 mb-2">
-                    Server Status
-                  </label>
-                  <div className="p-3 bg-slate-900/50 rounded-lg border border-slate-700">
-                    <div className="flex items-center justify-between">
-                      <span className={isConnected ? 'text-green-400' : 'text-red-400'}>
-                        {isConnected ? '🟢 Online' : '🔴 Offline'}
-                      </span>
-                      <a 
-                        href="http://localhost:8080/status" 
-                        target="_blank" 
-                        rel="noopener noreferrer"
-                        className="text-purple-400 hover:text-purple-300 text-sm"
-                      >
-                        Check Status
-                      </a>
+            {/* Messages */}
+            <div className="flex-1 overflow-y-auto p-6">
+              {activePlayer.messages.length === 0 ? (
+                <div className="text-center text-slate-500 mt-10">No messages yet.</div>
+              ) : (
+                activePlayer.messages.map(msg => (
+                  <div key={msg.id} className={`mb-4 flex ${msg.sender === 'host' ? 'justify-end' : 'justify-start'}`}>
+                    <div className={`max-w-[70%] rounded-2xl p-3 ${
+                      msg.sender === 'host' 
+                        ? 'bg-purple-600 text-white rounded-br-none' 
+                        : 'bg-slate-700 text-white rounded-bl-none'
+                    }`}>
+                      <div className="text-xs opacity-50 mb-1">
+                        {msg.sender === 'host' ? 'You' : activePlayer.username} • {msg.timestamp.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                      </div>
+                      <div>{msg.text}</div>
                     </div>
                   </div>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-slate-300 mb-2">
-                    Connected Players
-                  </label>
-                  <div className="p-3 bg-slate-900/50 rounded-lg border border-slate-700">
-                    {connectedPlayers.length === 0 ? (
-                      <p className="text-slate-400 text-sm">No players connected</p>
-                    ) : (
-                      <div className="space-y-1">
-                        {connectedPlayers.map(playerId => (
-                          <div key={playerId} className="flex items-center justify-between text-sm">
-                            <span className="text-green-400">🟢 {playerId.substring(0, 8)}...</span>
-                            <span className="text-slate-400">Online</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
+                ))
+              )}
+              <div ref={messagesEndRef} />
             </div>
 
-            {/* Instructions */}
-            <div className="bg-slate-800/50 backdrop-blur-md rounded-xl p-6 border border-purple-900/50">
-              <h2 className="text-xl font-bold mb-4">How to Use</h2>
-              <div className="space-y-3 text-sm text-slate-300">
-                <div className="flex items-start gap-2">
-                  <span className="text-purple-400">1.</span>
-                  <p>Keep the WebSocket server running with <code className="bg-slate-700 px-1 rounded">npm run host</code></p>
-                </div>
-                <div className="flex items-start gap-2">
-                  <span className="text-purple-400">2.</span>
-                  <p>Players automatically connect when Round 3 selects "human" mode</p>
-                </div>
-                <div className="flex items-start gap-2">
-                  <span className="text-purple-400">3.</span>
-                  <p>Chat naturally with players - they're trying to guess if you're human or AI</p>
-                </div>
-                <div className="flex items-start gap-2">
-                  <span className="text-purple-400">4.</span>
-                  <p>Be convincing! The game depends on your performance as host</p>
-                </div>
-              </div>
+            {/* Input box */}
+            <div className="p-4 bg-slate-800 border-t border-slate-700 flex gap-2">
+              <input
+                type="text"
+                value={input}
+                onChange={e => setInput(e.target.value)}
+                onKeyPress={e => e.key === 'Enter' && sendMessage()}
+                placeholder={isClaimedByMe ? "Type your message..." : "You must claim this player to chat"}
+                disabled={!isClaimedByMe}
+                className="flex-1 bg-slate-700 border border-slate-600 text-white px-4 py-3 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:opacity-50"
+              />
+              <button
+                onClick={sendMessage}
+                disabled={!isClaimedByMe || !input.trim()}
+                className="bg-purple-600 hover:bg-purple-700 px-6 py-3 rounded-lg font-bold disabled:opacity-50"
+              >
+                Send
+              </button>
             </div>
-
-            {/* Quick Actions */}
-            <div className="bg-slate-800/50 backdrop-blur-md rounded-xl p-6 border border-purple-900/50">
-              <h2 className="text-xl font-bold mb-4">Quick Actions</h2>
-              <div className="space-y-2">
-                <button
-                  onClick={() => window.open('http://localhost:8080', '_blank')}
-                  className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-lg transition-colors text-sm"
-                >
-                  📊 Open Server Dashboard
-                </button>
-                <button
-                  onClick={() => copyToClipboard('ws://localhost:8080')}
-                  className="w-full bg-green-600 hover:bg-green-700 text-white py-2 px-4 rounded-lg transition-colors text-sm"
-                >
-                  📋 Copy Server URL
-                </button>
-                <button
-                  onClick={() => window.location.reload()}
-                  className="w-full bg-red-600 hover:bg-red-700 text-white py-2 px-4 rounded-lg transition-colors text-sm"
-                >
-                  🔄 Reconnect
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+          </>
+        )}
       </div>
     </div>
   );

@@ -2,6 +2,16 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Suppress Puter Limit/Auth popups to allow silent fallbacks */
+iframe[src*="puter.com"], 
+iframe[src*="puter.site"],
+div[id^="puter-"] {
+  display: none !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  z-index: -9999 !important;
+}
+
 /* Bonus Games Styles */
 .mini-game-container {
   min-height: 100vh;

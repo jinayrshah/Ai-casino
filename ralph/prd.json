@@ -1,0 +1,48 @@
+{
+  "project": "Ai-casino",
+  "branchName": "ralph/round3-private-messaging",
+  "description": "Fix Round 3 (Turing Test) Multiplayer Logic to support isolated private chat between Host and Players",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Add private messaging methods to NetworkManager",
+      "description": "As a developer, I need methods in network.ts to send private messages without double-wrapping JSON.",
+      "acceptanceCriteria": [
+        "Add send_private_message_to_host(content) method",
+        "Add send_private_message_to_player(targetId, content) method",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "Update HostChatInterface to use private messaging",
+      "description": "As a host, I want my private replies to go exclusively to the target player, not broadcasted.",
+      "acceptanceCriteria": [
+        "Replace send_chat_message with send_private_message_to_player when a target player is selected",
+        "Auto-select a player in the dropdown when clicking their message",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "Update ChatInterface and Round3 to use private messaging",
+      "description": "As a player, I want my chat messages in Round 3 to only be seen by the host.",
+      "acceptanceCriteria": [
+        "Update ChatInterface.tsx to use send_private_message_to_host instead of send_chat_message",
+        "Remove the redundant register-player JSON payload from Round3.tsx",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": ""
+    }
+  ]
+}

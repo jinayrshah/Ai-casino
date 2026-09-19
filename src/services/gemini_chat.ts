@@ -1,82 +1,219 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
-// Get API key from Vite environment variables
-const API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
+const GROQ_KEYS = [
+  import.meta.env.VITE_GROQ_API_KEY_1,
+  import.meta.env.VITE_GROQ_API_KEY_2,
+  import.meta.env.VITE_GROQ_API_KEY_3
+].filter(Boolean);
 
-if (!API_KEY) {
+let currentGroqIndex = 0;
+
+const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
+let genAI: GoogleGenerativeAI | null = null;
+
+if (GEMINI_API_KEY) {
+  genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+} else {
   console.warn('GEMINI_API_KEY is not set. Please add it to your .env file');
 }
-
-// Initialize the Google Generative AI client
-const genAI = new GoogleGenerativeAI(API_KEY);
 
 // Simple in-memory conversation history
 let conversationHistory: string[] = [];
 
 /**
- * Get a response from Gemini AI with improved fallback system
+ * Call Groq Cloud API using OpenAI-compatible endpoint
+ */
+async function callGroqAPI(systemPrompt: string, userPrompt: string): Promise<string> {
+  if (GROQ_KEYS.length === 0) {
+    throw new Error('No Groq API keys available');
+  }
+
+  const startingIndex = currentGroqIndex;
+  
+  while (true) {
+    const key = GROQ_KEYS[currentGroqIndex];
+    try {
+      console.log(`Attempting Groq API with key index ${currentGroqIndex}`);
+      
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 12000);
+      
+      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${key}`,
+          'Content-Type': 'application/json'
+        },
+        signal: controller.signal,
+        body: JSON.stringify({
+          model: 'openai/gpt-oss-20b', // GPT OSS 20B (available model)
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt }
+          ],
+          max_tokens: 300,
+          temperature: 0.6 // Lower temp for more deterministic, grounded replies
+        })
+      });
+      
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        if (response.status === 429) {
+          throw new Error('Rate limit exceeded');
+        }
+        throw new Error(`Groq API error: ${response.status}`);
+      }
+
+      const data = await response.json();
+      return data.choices[0].message.content.trim();
+
+    } catch (error) {
+      console.warn(`Groq Key ${currentGroqIndex} failed:`, error);
+      // Rotate to next key
+      currentGroqIndex = (currentGroqIndex + 1) % GROQ_KEYS.length;
+      
+      // If we've tried all keys, throw error to trigger fallback
+      if (currentGroqIndex === startingIndex) {
+        throw new Error('All Groq keys exhausted or failed');
+      }
+    }
+  }
+}
+
+/**
+ * Helper to add AI response to history and return it
+ */
+const finalizeResponse = (text: string) => {
+  const cleanText = text.trim();
+  conversationHistory.push(`AI: ${cleanText}`);
+  if (conversationHistory.length > 20) {
+    conversationHistory = conversationHistory.slice(-20);
+  }
+  return cleanText;
+};
+
+/**
+ * Get a response from AI with 5-tier Puter -> Pollinations -> Gemini -> Groq -> Hardcode fallback system
  * @param message User's message
  * @returns AI response
  */
 export const get_ai_response = async (message: string): Promise<string> => {
-  if (!API_KEY) {
-    return generateFallbackResponse(message);
-  }
-
   try {
     console.log('Getting AI response for message:', message);
     
     // Add user message to history
     conversationHistory.push(`User: ${message}`);
 
-    // Try to use Gemini API first
-    try {
-      const model = genAI.getGenerativeModel({ 
-        model: 'gemini-2.0-flash', // Use the flash model for free tier
-        generationConfig: {
-          maxOutputTokens: 100,
-          temperature: 0.8,
-        }
-      });
-
-      // Build conversation context (last 4 exchanges)
-      const recentHistory = conversationHistory.slice(-8).join('\n');
-      
-      const prompt = `You are participating in a Turing test game. The user is trying to determine if you're human or AI. 
+    const recentHistory = conversationHistory.slice(-8).join('\n');
+    
+    const systemPrompt = `You are participating in a Turing test game. The user is trying to determine if you're human or AI. 
 Respond naturally and conversationally, but don't reveal you're an AI unless directly asked. 
-Keep responses under 2 sentences and sound like a real person. Be casual, use informal language.
+Keep responses under 2 sentences and sound like a real person. Be casual, use informal language.`;
 
-Recent conversation:
+    const userPrompt = `Recent conversation:
 ${recentHistory}
 
 User: ${message}
 You:`;
 
-      console.log('Sending prompt to Gemini:', prompt);
+    const fullPrompt = `${systemPrompt}\n\n${userPrompt}`;
+    
+    const pollinationsPrompt = `Respond as a human in a Turing test. Do not reveal you are an AI. Be very casual, like texting a friend. Keep it under 2 sentences. 
+Past context:
+${recentHistory}
 
-      const result = await model.generateContent(prompt);
-      const response = await result.response;
-      const text = response.text().trim();
+The user just said: '${message}'`;
 
-      console.log('Received AI response:', text);
+    let aiText = '';
 
-      // Add AI response to history
-      conversationHistory.push(`AI: ${text}`);
-
-      // Limit history size
-      if (conversationHistory.length > 20) {
-        conversationHistory = conversationHistory.slice(-20);
+    // Tier 1: Puter.js
+    try {
+      // @ts-ignore - puter injected via script tag
+      const signedIn = window.puter && (typeof window.puter.auth?.isSignedIn === 'function' 
+        ? window.puter.auth.isSignedIn() 
+        : (typeof window.puter.isSignedIn === 'function' ? window.puter.isSignedIn() : false));
+        
+      if (signedIn) {
+         console.log('Attempting Puter AI Chat...');
+         // @ts-ignore
+         const puterPromise = window.puter.ai.chat(pollinationsPrompt, { model: 'gpt-4o-mini' });
+         const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Puter timeout')), 8000));
+         const res = await Promise.race([puterPromise, timeoutPromise]);
+         // @ts-ignore
+         aiText = typeof res === 'string' ? res : (res?.message?.content || res?.toString());
+         
+         if (aiText && aiText.length > 2) {
+             console.log('Received response from Puter:', aiText);
+             return finalizeResponse(aiText);
+         }
+      } else {
+         console.log('Skipping Puter (not available or not signed in)');
       }
-
-      return text;
-
-    } catch (apiError) {
-      console.log('Gemini API failed, using fallback:', apiError);
-      return generateFallbackResponse(message);
+    } catch (e) {
+      console.warn('Puter failed:', e);
+    }
+    
+    // Tier 2: Pollinations
+    try {
+      console.log('Attempting Pollinations...');
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5s timeout
+      
+      const response = await fetch(`https://text.pollinations.ai/${encodeURIComponent(pollinationsPrompt)}?model=openai`, {
+          signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+      
+      if (response.ok) {
+          aiText = await response.text();
+          if (aiText && !aiText.includes('Queue full')) {
+            console.log('Received response from Pollinations:', aiText);
+            return finalizeResponse(aiText);
+          }
+      }
+    } catch (e) {
+        console.warn('Pollinations failed:', e);
     }
 
+    // Tier 3: Gemini
+    try {
+      console.log('Attempting Gemini...');
+      if (genAI) {
+        const model = genAI.getGenerativeModel({ 
+          model: 'gemini-1.5-flash',
+          generationConfig: { maxOutputTokens: 100, temperature: 0.8 }
+        });
+        
+        const geminiPromise = model.generateContent(fullPrompt);
+        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Gemini timeout')), 5000));
+        const result: any = await Promise.race([geminiPromise, timeoutPromise]);
+        
+        const response = await result.response;
+        aiText = response.text().trim();
+        console.log('Received response from Gemini:', aiText);
+        return finalizeResponse(aiText);
+      } else {
+        console.warn('Skipping Gemini (no API key)');
+      }
+    } catch (e) {
+        console.warn('Gemini failed:', e);
+    }
+    
+    // Tier 4: Groq
+    try {
+        console.log('Attempting Groq...');
+        aiText = await callGroqAPI(systemPrompt, userPrompt);
+        console.log('Received response from Groq:', aiText);
+        return finalizeResponse(aiText);
+    } catch(e) {
+        console.warn('Groq failed:', e);
+    }
+    
+    throw new Error('All APIs exhausted');
+
   } catch (error) {
-    console.error('Error in get_ai_response:', error);
+    console.error('All APIs failed, using hardcoded fallback:', error);
     return generateFallbackResponse(message);
   }
 };
@@ -87,114 +224,88 @@ You:`;
 const generateFallbackResponse = (message: string): string => {
   const messageLower = message.toLowerCase().trim();
   
-  // Add to conversation history for context
-  conversationHistory.push(`User: ${message}`);
+  if (!conversationHistory.length || !conversationHistory[conversationHistory.length - 1].startsWith('User:')) {
+      conversationHistory.push(`User: ${message}`);
+  }
   
-  // Pattern-based responses (similar to your Python logic)
   const responsePatterns: {pattern: RegExp, responses: string[]}[] = [
     {
       pattern: /hello|hi|hey|greetings|what's up|yo/i,
       responses: [
-        "Hello! How are you today?", 
-        "Hi there! Nice to chat with you.", 
-        "Hey! What would you like to talk about?",
-        "Hello! How's your day going?",
-        "Hi! I'm enjoying this conversation."
+        "Hey there! What's on your mind?", 
+        "Hi! How are you doing today?", 
+        "Yo! What are we chatting about?",
+        "Hey! How's it going?",
+        "Hi! Ready for the next round?"
       ]
     },
     {
       pattern: /how are you|how do you do|how's it going/i,
       responses: [
-        "I'm doing well, thanks for asking! How about you?", 
-        "I'm good! What's on your mind today?", 
-        "All good here! How's your day going?",
-        "Pretty good! Just chatting with you 😊",
-        "I'm doing great! Thanks for asking."
+        "I'm doing well, just hanging out here. You?", 
+        "Pretty good, actually! Trying to win this game.", 
+        "All good here! How's your day been?",
+        "Doing fine! Just chatting away.",
+        "I'm great! Thanks for asking."
       ]
     },
     {
-      pattern: /what are you|who are you|are you ai|are you bot/i,
+      pattern: /what are you|who are you|are you ai|are you bot|robot|are you real|are you human|prove it/i,
       responses: [
-        "I'm just someone enjoying this conversation with you!", 
-        "I'm here to chat and get to know you better.", 
-        "I'm your conversation partner for this game.",
-        "I'm just a friendly person who likes to chat!",
-        "I'm here to have a good conversation with you."
+        "Haha, I'm just a normal person trying to play this game.", 
+        "I'm definitely human! Sitting right here typing this.", 
+        "I'm your opponent! Or maybe your partner? We'll see.",
+        "Just a regular player like you!",
+        "Why, do I sound like a bot? I'm human I promise!",
+        "If I were an AI, would I be this bad at typing? lol",
+        "100% human. Unless this is the Matrix.",
+        "I'm real! But honestly, that's exactly what an AI would say, right? 😂",
+        "Dude I'm just trying to win these chips.",
+        "I promise I'm human! I even had coffee this morning."
+      ]
+    },
+    {
+      pattern: /turing test|turing|test/i,
+      responses: [
+        "This whole Turing test thing is making me paranoid.",
+        "I'm pretty sure you're the AI in this Turing test.",
+        "Are you testing me? I'm just a person lol.",
+        "I don't know how to prove I'm human over a chat box!",
+        "Plot twist: we're both AI."
       ]
     },
     {
       pattern: /joke|funny|laugh|humor/i,
       responses: [
-        "Why don't scientists trust atoms? Because they make up everything!",
-        "Why did the scarecrow win an award? Because he was outstanding in his field!",
-        "What do you call a fake noodle? An impasta!",
-        "Why did the math book look so sad? Because it had too many problems!",
-        "What's a computer's favorite snack? Microchips!"
+        "I'm terrible at jokes under pressure!",
+        "Why did the computer go to the doctor? It had a virus! (Sorry, that was bad)",
+        "I can't think of one right now, my mind went blank.",
+        "You're putting me on the spot! I don't know any good jokes.",
+        "I'll spare you my terrible sense of humor today."
       ]
     },
     {
-      pattern: /weather|temperature|rain|sunny|cold|hot/i,
+      pattern: /ronaldo|messi|football|soccer|team/i,
       responses: [
-        "I don't have access to weather information, but I hope it's nice where you are!",
-        "The weather? I'm more interested in our conversation!",
-        "I'm not sure about the weather, but I'm enjoying our chat!",
-        "Weather can be so unpredictable these days!",
-        "I love talking about the weather! What's it like where you are?"
+        "Honestly both are legends, but I lean towards Messi.",
+        "Ronaldo all the way! His work ethic is insane.",
+        "I'm not the biggest football fan to be honest.",
+        "I respect both, but Messi's dribbling is magical.",
+        "CR7! The goat!"
       ]
     },
     {
-      pattern: /bye|goodbye|see you|farewell|cya/i,
+      pattern: /singer|music|song|artist/i,
       responses: [
-        "Goodbye! It was nice chatting with you.", 
-        "See you later! Have a great day!", 
-        "Farewell! Thanks for the conversation!",
-        "Bye! Hope to chat with you again soon!",
-        "See you! This was fun!"
-      ]
-    },
-    {
-      pattern: /name|call you|who am i/i,
-      responses: [
-        "You can call me whatever you'd like! What should I call you?",
-        "I don't really have a name for this chat. What's your name?",
-        "I'm just your chat partner for now!",
-        "No name needed - let's just enjoy our conversation!",
-        "I'm fine with being anonymous for this chat!"
-      ]
-    },
-    {
-      pattern: /age|old|young/i,
-      responses: [
-        "Age is just a number! I prefer to focus on our conversation.",
-        "I'm old enough to have a good conversation! How about you?",
-        "Let's not worry about age and just enjoy chatting!",
-        "I'm at a good age for interesting conversations!",
-        "Age doesn't matter when we're having a good chat!"
-      ]
-    },
-    {
-      pattern: /hobby|interest|like to do|free time/i,
-      responses: [
-        "I enjoy chatting with people like you! What are your hobbies?",
-        "I like reading, gaming, and having good conversations!",
-        "I'm into all kinds of things - music, movies, books. What about you?",
-        "I love learning new things and meeting new people through chats!",
-        "I enjoy casual conversations and getting to know people!"
-      ]
-    },
-    {
-      pattern: /food|eat|hungry|meal|dinner|lunch|breakfast/i,
-      responses: [
-        "I love food! Pizza and sushi are my favorites. What about you?",
-        "Now you're making me hungry! What's your favorite food?",
-        "I could really go for some good food right now!",
-        "Food is the best! I'm always up for trying new cuisines.",
-        "I'm getting hungry just talking about food! What do you like to eat?"
+        "I listen to a bit of everything, but The Weeknd is great.",
+        "Mostly pop and rock. You?",
+        "I'm a big Taylor Swift fan actually!",
+        "I don't have a favorite, it depends on my mood.",
+        "Anything with a good beat honestly."
       ]
     }
   ];
 
-  // Check for pattern matches
   for (const {pattern, responses} of responsePatterns) {
     if (pattern.test(messageLower)) {
       const response = responses[Math.floor(Math.random() * responses.length)];
@@ -203,51 +314,23 @@ const generateFallbackResponse = (message: string): string => {
     }
   }
 
-  // Contextual responses based on conversation history
-  const lastUserMessage = conversationHistory.filter(msg => msg.startsWith('User:')).slice(-1)[0] || '';
-  const lastUserMessageLower = lastUserMessage.toLowerCase();
-
-  // If user repeated themselves or similar message
-  if (conversationHistory.filter(msg => 
-      msg.startsWith('User:') && 
-      msg.toLowerCase().includes(messageLower) && 
-      msg !== `User: ${message}`
-    ).length > 0) {
-    const repeatedResponses = [
-      "You mentioned that before! What else would you like to talk about?",
-      "We were just talking about that! Did you want to explore it further?",
-      "That's interesting you bring that up again. What's on your mind about it?",
-      "I remember we discussed that. Is there something specific you wanted to know?",
-      "You seem interested in that topic! What else would you like to share?"
-    ];
-    const response = repeatedResponses[Math.floor(Math.random() * repeatedResponses.length)];
-    conversationHistory.push(`AI: ${response}`);
-    return response;
-  }
-
   // Default contextual responses
   const defaultResponses = [
-    "That's an interesting point. What do you think about it?",
-    "I'm not sure I understand completely. Could you elaborate?",
-    "That's fascinating! Tell me more about that.",
-    "I see what you mean. Could you explain further?",
-    "That's a good question. What's your perspective on it?",
-    "I'm enjoying our conversation. What else would you like to discuss?",
-    "That's quite thought-provoking. I'd love to hear more of your thoughts.",
-    "I appreciate your perspective. Could you tell me more about that?",
-    "That's an interesting way to look at it. What made you think that way?",
-    "I'm curious to know more about your thoughts on this topic.",
-    "That's really interesting! What else have you been thinking about?",
-    "I love how you put that! Could you share more?",
-    "That's a unique perspective! How did you come to that conclusion?",
-    "I find that really engaging! What else is on your mind?",
-    "That's cool! I'd love to hear more about your experiences."
+    "Oh that's interesting. Tell me more?",
+    "I'm not totally sure I follow, can you explain?",
+    "Yeah I completely agree with that.",
+    "That makes sense to me.",
+    "Hmm, I haven't really thought about it like that before.",
+    "Haha yeah, exactly!",
+    "That's pretty cool actually.",
+    "I see what you mean.",
+    "Gotcha. What else is going on?",
+    "Fair point!"
   ];
 
   const response = defaultResponses[Math.floor(Math.random() * defaultResponses.length)];
   conversationHistory.push(`AI: ${response}`);
   
-  // Limit history size
   if (conversationHistory.length > 20) {
     conversationHistory = conversationHistory.slice(-20);
   }
@@ -255,9 +338,6 @@ const generateFallbackResponse = (message: string): string => {
   return response;
 };
 
-/**
- * Reset the conversation history
- */
 export const reset_conversation = (): void => {
   console.log('Resetting conversation history');
   conversationHistory = [];

@@ -22,14 +22,15 @@ export default function Round2({ currentChips, onComplete }: Round2Props) {
 
   // Timer effect
   useEffect(() => {
-    if (phase === 'playing' && roundTimeLeft > 0) {
+    if (phase === 'playing') {
+      if (roundTimeLeft === 0) {
+        setPhase('results');
+        return;
+      }
+      
       const timer = setInterval(() => {
         setRoundTimeLeft((prev) => (prev <= 1 ? 0 : prev - 1));
       }, 1000);
-      
-      if (roundTimeLeft === 0) {
-        setPhase('results');
-      }
       
       return () => clearInterval(timer);
     }

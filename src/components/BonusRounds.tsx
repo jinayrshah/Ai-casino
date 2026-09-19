@@ -12,10 +12,10 @@ interface BonusRoundsProps {
 export default function BonusRounds({ currentChips, onComplete, onChipUpdate, currentRound }: BonusRoundsProps) {
   const [screen, setScreen] = useState<'menu' | 'wheel' | 'cardgame' | 'datadash' | 'dicegame' | 'minesgame' | 'numberguess' | 'results'>('menu');
   const [selectedBet, setSelectedBet] = useState<number | null>(null);
-  const [wheelResult, setWheelResult] = useState<string>('');
+
   const [playedGames, setPlayedGames] = useState<Set<string>>(new Set());
 
-  const handleSelectBonusBet = (amount: number, gameType?: string) => {
+  const handleSelectBonusBet = (amount: number, _gameType?: string) => {
     setSelectedBet(amount);
   };
 
@@ -26,7 +26,7 @@ export default function BonusRounds({ currentChips, onComplete, onChipUpdate, cu
   const handleWheelBack = () => {
     setScreen('menu');
     setSelectedBet(null);
-    setWheelResult('');
+
     markGameAsPlayed('wheel');
   };
 

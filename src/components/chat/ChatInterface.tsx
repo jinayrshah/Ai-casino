@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, Bot, User } from 'lucide-react';
+import { Send } from 'lucide-react';
 import { network_manager } from '../../services/network';
 import { get_ai_response } from '../../services/gemini_chat';
 
@@ -8,7 +8,7 @@ type NetworkMessage = {
   type: 'chat' | 'connect' | 'connected' | 'disconnect' | 'error' |
         'player-joined' | 'player-left' | 'player-list' |
         'host-registered' | 'host-available' | 'host-disconnected' |
-        'register-host' | 'player-join';
+        'register-host' | 'player-join' | 'private-message' | 'player-private-message';
   content?: string;
   message?: string;
   timestamp: number;
@@ -19,6 +19,7 @@ type NetworkMessage = {
   recipientId?: string;
   isPrivate?: boolean;
   players?: string[];
+  targetPlayerId?: string;
 };
 
 type Message = {
@@ -238,8 +239,8 @@ export default function ChatInterface({ mode, onComplete, timeLimit, onTimeUp, m
         }]);
       }
     } else {
-      // Send to human chat
-      network_manager.send_chat_message(input);
+      // Send to human chat (privately to host)
+      network_manager.send_private_message_to_host(input);
     }
   };
 

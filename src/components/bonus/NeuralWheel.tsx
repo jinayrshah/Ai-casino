@@ -16,12 +16,12 @@ interface WheelSegment {
   displayText: string;
 }
 
-const NeuralWheel: React.FC<NeuralWheelProps> = ({ onBack, onSelectBonusBet, onChipUpdate, selectedBet, result, currentChips }) => {
+const NeuralWheel: React.FC<NeuralWheelProps> = ({ onBack, onChipUpdate, currentChips }) => {
   const wheelRef = useRef<SVGSVGElement>(null);
   const [isSpinning, setIsSpinning] = useState(false);
   const [hasSpun, setHasSpun] = useState(false);
   const [wheelResult, setWheelResult] = useState<WheelSegment | null>(null);
-  const [showResult, setShowResult] = useState(false);
+
 
   const wheelSegments: WheelSegment[] = [
     { color: '#FF6B6B', result: 'Lose Turn', multiplier: 0, displayText: 'LOSE' },
@@ -61,7 +61,7 @@ const NeuralWheel: React.FC<NeuralWheelProps> = ({ onBack, onSelectBonusBet, onC
 
     console.log('NeuralWheel: Starting spin');
     setIsSpinning(true);
-    setShowResult(false);
+
     setWheelResult(null);
     setHasSpun(true); // Prevent multiple spins
 
@@ -93,7 +93,7 @@ const NeuralWheel: React.FC<NeuralWheelProps> = ({ onBack, onSelectBonusBet, onC
       const result = wheelSegments[randomSegment];
       console.log('NeuralWheel: Spin result:', result);
       setWheelResult(result);
-      setShowResult(true);
+
       setIsSpinning(false);
 
       // Calculate and update earnings (no chip deduction for free play)

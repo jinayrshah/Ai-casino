@@ -9,7 +9,7 @@ interface CardGameProps {
   currentChips: number;
 }
 
-const CardGame: React.FC<CardGameProps> = ({ onBack, onSelectBonusBet, onChipUpdate, selectedBet, result, currentChips }) => {
+const CardGame: React.FC<CardGameProps> = ({ onBack, onSelectBonusBet, onChipUpdate, selectedBet, currentChips }) => {
   const [winningCard, setWinningCard] = useState('');
   const [selectedCard, setSelectedCard] = useState('');
   const [showResult, setShowResult] = useState(false);
@@ -50,7 +50,7 @@ const CardGame: React.FC<CardGameProps> = ({ onBack, onSelectBonusBet, onChipUpd
     if (cardType === winningCard) {
       const winnings = selectedBet * 2;
       console.log('CardGame: Player won! Awarding', winnings, 'chips');
-      onChipUpdate(currentChips + winnings - selectedBet); // Current chips minus bet plus winnings
+      onChipUpdate(currentChips + winnings); // Current chips already had bet deducted
     }
   };
 

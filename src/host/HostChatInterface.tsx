@@ -19,9 +19,7 @@ interface Player {
 }
 
 export default function HostChatInterface() {
-  const [isConnected, setIsConnected] = useState(false);
-  const [connectionStatus, setConnectionStatus] = useState('Connecting to server...');
-  const [isLoading, setIsLoading] = useState(true);
+
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [players, setPlayers] = useState<Player[]>([]);
@@ -31,11 +29,7 @@ export default function HostChatInterface() {
   useEffect(() => {
     // Set up as host
     network_manager.connection_callback = (connected, message) => {
-      setIsConnected(connected);
-      setConnectionStatus(connected ? 'Connected to server!' : message || 'Connecting...');
-      setIsLoading(!connected);
       if (connected) {
-        // Register as host (direct protocol)
         const registerMsg = {
           type: 'register-host',
           clientId: network_manager.get_local_id?.(),
@@ -61,8 +55,6 @@ export default function HostChatInterface() {
 
     network_manager.message_callback = (msg: any) => {
       if (msg.type === 'host-registered') {
-        setConnectionStatus('✅ Host registered - Waiting for players...');
-        setIsLoading(false);
         addSystemMessage('You are now the host! Players can connect to chat.');
       } else if (msg.type === 'player-joined') {
         setPlayers(prev => {
@@ -123,7 +115,8 @@ export default function HostChatInterface() {
     };
 
     // Connect as host
-    network_manager.connect_to_host('ws://localhost:8080').then(() => {
+    const hostAddress = import.meta.env.VITE_WS_URL || `ws://${window.location.hostname}:8080`;
+    network_manager.connect_to_host(hostAddress).then(() => {
       // Register as host
       network_manager.send_chat_message(JSON.stringify({
         type: 'register-host'
@@ -148,19 +141,23 @@ export default function HostChatInterface() {
 
     setMessages(prev => [...prev, hostMessage]);
     
-    // Create standardized message format
-    const messageData = {
-      type: 'chat',
-      content: input,
-      senderId: 'host',
-      senderName: 'Host',
-      timestamp: new Date().toISOString(),
-      isPrivate: selectedPlayerId !== 'all',
-      targetPlayerId: selectedPlayerId === 'all' ? undefined : selectedPlayerId
-    };
-    
-    // Send as JSON string
-    network_manager.send_chat_message(JSON.stringify(messageData));
+    if (selectedPlayerId === 'all') {
+      // Create standardized message format
+      const messageData = {
+        type: 'chat',
+        content: input,
+        senderId: 'host',
+        senderName: 'Host',
+        timestamp: new Date().toISOString(),
+        isPrivate: false
+      };
+      
+      // Send broadcast
+      network_manager.send_chat_message(JSON.stringify(messageData));
+    } else {
+      // Send private message to specific player
+      network_manager.send_private_message_to_player(selectedPlayerId, input);
+    }
     
     setInput('');
   };
@@ -222,7 +219,16 @@ export default function HostChatInterface() {
             
             return (
               <div key={msg.id} className={`mb-3 ${msg.sender === 'host' ? 'text-right' : 'text-left'}`}>
-                <div className={`inline-block rounded-lg p-3 max-w-md ${bgColor}`}>
+                <div 
+                  className={`inline-block rounded-lg p-3 max-w-md ${bgColor} ${msg.sender === 'player' ? 'cursor-pointer hover:opacity-90' : ''}`}
+                  onClick={() => {
+                    if (msg.sender === 'player' && msg.playerId) {
+                      setSelectedPlayerId(msg.playerId);
+                      // Focus input could be added here
+                    }
+                  }}
+                  title={msg.sender === 'player' ? 'Click to reply privately' : ''}
+                >
                   <div className="flex items-center gap-2 mb-1">
                     <div className="text-sm font-medium">{displayName}</div>
                     {badge && (

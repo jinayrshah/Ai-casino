@@ -9,7 +9,7 @@ interface DiceGameProps {
   currentChips: number;
 }
 
-const DiceGame: React.FC<DiceGameProps> = ({ onBack, onSelectBonusBet, onChipUpdate, selectedBet, result, currentChips }) => {
+const DiceGame: React.FC<DiceGameProps> = ({ onBack, onSelectBonusBet, onChipUpdate, selectedBet, currentChips }) => {
   const [dice1, setDice1] = useState<number | string>('?');
   const [dice2, setDice2] = useState<number | string>('?');
   const [rolling, setRolling] = useState(false);
@@ -65,7 +65,7 @@ const DiceGame: React.FC<DiceGameProps> = ({ onBack, onSelectBonusBet, onChipUpd
         if (sum === guess) {
           const winnings = selectedBet * 3; // 3x payout for correct guess
           console.log('DiceGame: Player won! Awarding', winnings, 'chips');
-          onChipUpdate(currentChips + winnings - selectedBet);
+          onChipUpdate(currentChips + winnings);
           setIsWin(true);
         } else {
           setIsWin(false);
@@ -74,16 +74,7 @@ const DiceGame: React.FC<DiceGameProps> = ({ onBack, onSelectBonusBet, onChipUpd
     }, 100);
   };
 
-  const resetGame = () => {
-    setDice1('?');
-    setDice2('?');
-    setRolling(false);
-    setUserGuess('');
-    setShowResult(false);
-    setIsWin(false);
-    setHasDeductedBet(false);
-    onSelectBonusBet(0, 'dice'); // Reset selected bet
-  };
+
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-indigo-900 to-slate-900 flex items-center justify-center px-4">

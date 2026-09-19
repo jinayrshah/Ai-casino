@@ -1,283 +1,196 @@
-/**
- * Hugging Face API service for image generation with multi-key support
- */
-
-interface HuggingFaceConfig {
-  HF_TOKENS: string[];
-}
-
-// Key management class for cycling through API keys
-class HuggingFaceKeyManager {
-  private keys: string[] = [];
-  private currentKeyIndex: number = 0;
-  private failedKeys: Set<number> = new Set();
-
-  constructor(keys: string[]) {
-    this.keys = [...keys]; // Create a copy to avoid mutations
-  }
-
-  getCurrentKey(): string {
-    return this.keys[this.currentKeyIndex];
-  }
-
-  getNextAvailableKey(): string | null {
-    // Find the next key that hasn't failed recently
-    for (let i = 0; i < this.keys.length; i++) {
-      const keyIndex = (this.currentKeyIndex + i + 1) % this.keys.length;
-      if (!this.failedKeys.has(keyIndex)) {
-        this.currentKeyIndex = keyIndex;
-        return this.keys[keyIndex];
-      }
-    }
-    return null; // All keys have failed
-  }
-
-  markCurrentKeyFailed(): void {
-    this.failedKeys.add(this.currentKeyIndex);
-    console.log(`[HF] Marked key ${this.currentKeyIndex} as failed`);
-  }
-
-  resetFailedKeys(): void {
-    this.failedKeys.clear();
-    this.currentKeyIndex = 0;
-    console.log('[HF] Reset all failed keys');
-  }
-
-  getAvailableKeysCount(): number {
-    return this.keys.length - this.failedKeys.size;
-  }
-}
-
-// Global key manager instance
-let keyManager: HuggingFaceKeyManager | null = null;
-
-// Get config from .bolt/config.json
-async function getConfig(): Promise<HuggingFaceConfig> {
-  try {
-    const response = await fetch('/.bolt/config.json');
-    if (!response.ok) {
-      throw new Error('Failed to load config');
-    }
-    return await response.json();
-  } catch (error) {
-    console.error('Error loading config:', error);
-    throw new Error('Configuration file not found. Please add HF_TOKENS array to .bolt/config.json');
-  }
-}
-
-// Initialize the key manager
-async function initializeKeyManager(): Promise<void> {
-  if (!keyManager) {
-    try {
-      // Try to load keys from localStorage first (development)
-      let keys = getStoredApiKeys();
-
-      // If no keys in localStorage, fall back to config file
-      if (keys.length === 0) {
-        const config = await getConfig();
-        if (!config.HF_TOKENS || !Array.isArray(config.HF_TOKENS) || config.HF_TOKENS.length === 0) {
-          throw new Error('HF_TOKENS array not found or empty in config. Please add your Hugging Face tokens to .bolt/config.json');
-        }
-        keys = config.HF_TOKENS;
-      }
-
-      keyManager = new HuggingFaceKeyManager(keys);
-      console.log(`[HF] Initialized with ${keys.length} API keys`);
-    } catch (error) {
-      console.error('[HF] Failed to initialize key manager:', error);
-      throw error;
-    }
-  }
-}
-
 export interface GeneratedImage {
-  data: string; // Base64 encoded image data
+  data: string; // URL or base64 to the image
   prompt: string;
 }
 
-/**
- * Generate an image using Hugging Face Inference API with automatic key fallback
- */
-export async function generateImage(prompt: string): Promise<GeneratedImage> {
-  await initializeKeyManager();
-
-  if (!keyManager) {
-    throw new Error('Key manager not initialized');
+// Ensure puter is available globally
+declare global {
+  interface Window {
+    puter?: any;
   }
-
-  let lastError: Error | null = null;
-
-  // Try with current key first, then cycle through available keys
-  for (let attempt = 0; attempt < keyManager.getAvailableKeysCount(); attempt++) {
-    const currentKey = keyManager.getCurrentKey();
-
-    try {
-      console.log(`[HF] Generating image with key ${keyManager['currentKeyIndex']} for prompt: ${prompt}`);
-
-      const response = await fetch(
-        `https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-xl-base-1.0`,
-        {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${currentKey}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            inputs: prompt,
-            options: {
-              wait_for_model: true
-            }
-          }),
-        }
-      );
-
-      if (response.ok) {
-        // Success - reset failed keys since this one worked
-        keyManager.resetFailedKeys();
-
-        // Get the image as blob and convert to base64
-        const blob = await response.blob();
-        const arrayBuffer = await blob.arrayBuffer();
-        const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
-
-        return {
-          data: `data:${blob.type};base64,${base64}`,
-          prompt
-        };
-      }
-
-      // Handle specific error cases
-      if (response.status === 429) {
-        // Rate limit exceeded - mark key as failed and try next
-        console.log(`[HF] Rate limit exceeded for key ${keyManager['currentKeyIndex']}`);
-        keyManager.markCurrentKeyFailed();
-        lastError = new Error(`Rate limit exceeded for API key`);
-      } else if (response.status === 401 || response.status === 403) {
-        // Invalid or expired token - mark as failed
-        console.log(`[HF] Invalid token for key ${keyManager['currentKeyIndex']}`);
-        keyManager.markCurrentKeyFailed();
-        lastError = new Error(`Invalid API key`);
-      } else {
-        // Other errors - still try next key
-        console.log(`[HF] API error ${response.status} for key ${keyManager['currentKeyIndex']}`);
-        keyManager.markCurrentKeyFailed();
-        lastError = new Error(`API error: ${response.status} ${response.statusText}`);
-      }
-
-      // Try next key
-      const nextKey = keyManager.getNextAvailableKey();
-      if (!nextKey) {
-        break; // No more keys to try
-      }
-
-    } catch (error) {
-      console.error(`[HF] Network error with key ${keyManager['currentKeyIndex']}:`, error);
-      keyManager.markCurrentKeyFailed();
-      lastError = error as Error;
-
-      // Try next key
-      const nextKey = keyManager.getNextAvailableKey();
-      if (!nextKey) {
-        break; // No more keys to try
-      }
-    }
-  }
-
-  // All keys failed or no keys available
-  const availableKeys = keyManager.getAvailableKeysCount();
-  if (availableKeys === 0) {
-    throw new Error('All Hugging Face API keys have been exhausted or are invalid. Please check your configuration.');
-  }
-
-  throw lastError || new Error('All available API keys failed');
 }
 
-/**
- * Generate multiple images for a round
- */
-export async function generateRoundImages(prompts: string[]): Promise<GeneratedImage[]> {
-  const images: GeneratedImage[] = [];
-
-  for (const prompt of prompts) {
-    try {
-      const image = await generateImage(prompt);
-      images.push(image);
-    } catch (error) {
-      console.error(`Failed to generate image for prompt: ${prompt}`, error);
-      // Create a fallback image (you could also use a default image URL)
-      images.push({
-        data: await createFallbackImage(),
-        prompt
+// Timeout helper
+const withTimeout = <T>(promise: Promise<T>, ms: number): Promise<T> => {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`Timeout after ${ms}ms`)), ms);
+    promise
+      .then((res) => {
+        clearTimeout(timer);
+        resolve(res);
+      })
+      .catch((err) => {
+        clearTimeout(timer);
+        reject(err);
       });
-    }
+  });
+};
+
+
+
+// 1. Puter (Primary)
+async function generateWithPuter(prompt: string): Promise<string> {
+  if (!window.puter || !window.puter.ai || !window.puter.ai.txt2img) {
+    throw new Error('Puter.js not loaded or txt2img not available');
+  }
+  
+  const signedIn = typeof window.puter.auth?.isSignedIn === 'function' 
+    ? window.puter.auth.isSignedIn() 
+    : (typeof window.puter.isSignedIn === 'function' ? window.puter.isSignedIn() : false);
+    
+  if (!signedIn) {
+    throw new Error('Puter requires sign-in, skipping to avoid popup');
   }
 
-  return images;
+  // Capture current DOM nodes attached to body to clean up Puter popups on failure
+  const childNodesBefore = Array.from(document.body.childNodes);
+
+  try {
+    const res = await window.puter.ai.txt2img(prompt, { model: 'black-forest-labs/flux-1.1-pro' });
+    if (!res) throw new Error("Puter returned an empty response");
+    return typeof res === 'string' ? res : res.src;
+  } catch (error) {
+    // If Puter fails (e.g. low balance), it dynamically injects an iframe popup. We aggressively remove it.
+    const currentNodes = Array.from(document.body.childNodes);
+    currentNodes.forEach(node => {
+      if (!childNodesBefore.includes(node)) {
+        try { document.body.removeChild(node); } catch (e) {}
+      }
+    });
+    
+    // Fallback: Remove any element with 'puter' in its ID or class that isn't the main script
+    document.querySelectorAll('[id*="puter"], [class*="puter"]').forEach(el => {
+      if (el.tagName !== 'SCRIPT') {
+        try { el.remove(); } catch (e) {}
+      }
+    });
+    
+    throw error;
+  }
 }
 
-/**
- * Create a fallback image when generation fails
- */
-async function createFallbackImage(): Promise<string> {
-  // Create a simple SVG fallback image
+// 2. Pollinations
+async function generateWithPollinations(prompt: string): Promise<string> {
+  const encodedPrompt = encodeURIComponent(prompt);
+  // Proxy through our backend to bypass browser CORS (403 Forbidden) on localhost
+  const baseUrl = import.meta.env.VITE_BACKEND_URL || `http://${window.location.hostname}:8080`;
+  const url = `${baseUrl}/api/generate-pollinations?prompt=${encodedPrompt}`;
+  
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Pollinations API error: ${response.status} ${response.statusText}`);
+  }
+  
+  const blob = await response.blob();
+  return URL.createObjectURL(blob);
+}
+
+// 3. Hugging Face (Proxied through backend to bypass AdBlockers)
+async function generateWithHuggingFace(prompt: string): Promise<string> {
+  const baseUrl = import.meta.env.VITE_BACKEND_URL || `http://${window.location.hostname}:8080`;
+  const response = await fetch(`${baseUrl}/api/generate-huggingface`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt }),
+  });
+
+  if (!response.ok) {
+    let errorText = response.statusText;
+    try {
+      const errJson = await response.json();
+      errorText = errJson.error || errorText;
+    } catch (e) {}
+    throw new Error(`Hugging Face proxy error: ${errorText}`);
+  }
+
+  const blob = await response.blob();
+  return URL.createObjectURL(blob);
+}
+
+// 4. Hardcoded Fallbacks
+function getHardcodedFallback(imageId?: number): string {
+  if (imageId && imageId >= 1 && imageId <= 5) {
+    return `/fallback-images/image${imageId}.jpg`;
+  }
+  const fallbacks = [
+    '/fallback-images/mountains.jpg',
+    '/fallback-images/sunset.jpg',
+    '/fallback-images/hills.jpg'
+  ];
+  return fallbacks[Math.floor(Math.random() * fallbacks.length)];
+}
+
+// 5. SVG Fallback
+function createFallbackSVG(): string {
   const svg = `
     <svg width="500" height="300" xmlns="http://www.w3.org/2000/svg">
       <rect width="100%" height="100%" fill="#323232"/>
       <text x="50%" y="50%" font-family="Arial, sans-serif" font-size="18" fill="#ccc" text-anchor="middle" dy=".3em">
-        Image not available
+        Image generation failed. Enjoy this placeholder!
       </text>
     </svg>
   `;
-
   const encoder = new TextEncoder();
   const data = encoder.encode(svg);
   const base64 = btoa(String.fromCharCode(...data));
-
   return `data:image/svg+xml;base64,${base64}`;
 }
 
-/**
- * Add a new API key to the configuration
- * This function can be called from the browser console for easy key management
- */
-export async function addApiKey(newKey: string): Promise<void> {
+export async function generateImage(prompt: string, imageId?: number): Promise<GeneratedImage> {
   try {
-    // For development, we'll use localStorage as a temporary key store
-    // In production, this should be handled server-side
-    const existingKeys = getStoredApiKeys();
-    if (!existingKeys.includes(newKey)) {
-      existingKeys.push(newKey);
-      localStorage.setItem('hf_api_keys', JSON.stringify(existingKeys));
-
-      // Update the key manager if it exists
-      if (keyManager) {
-        keyManager = new HuggingFaceKeyManager(existingKeys);
-        console.log(`[HF] Added new API key. Total keys: ${existingKeys.length}`);
-      }
-    } else {
-      console.log('[HF] Key already exists in configuration');
-    }
+    console.log(`[ImageGen] Tier 1: Trying Puter...`);
+    const imageUrl = await withTimeout(generateWithPuter(prompt), 20000);
+    return { data: imageUrl, prompt };
   } catch (error) {
-    console.error('[HF] Error adding API key:', error);
+    console.warn(`[ImageGen] Tier 1 Puter failed:`, error);
   }
+
+  try {
+    console.log(`[ImageGen] Tier 2: Trying Pollinations...`);
+    const imageUrl = await withTimeout(generateWithPollinations(prompt), 20000);
+    return { data: imageUrl, prompt };
+  } catch (error) {
+    console.warn(`[ImageGen] Tier 2 Pollinations failed:`, error);
+  }
+
+  try {
+    console.log(`[ImageGen] Tier 3: Trying Hugging Face...`);
+    const imageUrl = await withTimeout(generateWithHuggingFace(prompt), 15000);
+    return { data: imageUrl, prompt };
+  } catch (error) {
+    console.warn(`[ImageGen] Tier 3 Hugging Face failed:`, error);
+  }
+
+  try {
+    console.log(`[ImageGen] Tier 4: Using Hardcoded fallback`);
+    return { data: getHardcodedFallback(imageId), prompt };
+  } catch (error) {
+    console.warn(`[ImageGen] Tier 4 Hardcoded failed:`, error);
+  }
+
+  console.log(`[ImageGen] Tier 5: Using SVG placeholder`);
+  return { data: createFallbackSVG(), prompt };
 }
 
-/**
- * Get API keys from localStorage (development) or config file (production)
- */
-function getStoredApiKeys(): string[] {
-  try {
-    // Try localStorage first (for development)
-    const stored = localStorage.getItem('hf_api_keys');
-    if (stored) {
-      return JSON.parse(stored);
+// Optional Auth Helper for Puter (can be called on mount if needed)
+export async function ensurePuterAuth() {
+  if (window.puter) {
+    const signedIn = typeof window.puter.auth?.isSignedIn === 'function' ? window.puter.auth.isSignedIn() : window.puter.isSignedIn();
+    if (!signedIn) {
+      try {
+        if (typeof window.puter.auth?.signIn === 'function') {
+          await window.puter.auth.signIn();
+        } else {
+          await window.puter.signIn();
+        }
+      } catch (e) {
+        console.warn("Puter sign-in failed or was cancelled.", e);
+        alert("Puter sign-in failed. Check the console for details.");
+      }
+    } else {
+      alert("Already signed in to Puter!");
     }
-  } catch (error) {
-    console.warn('[HF] Could not load keys from localStorage');
+  } else {
+    alert("Puter script not loaded yet.");
   }
-
-  // Fallback to config file
-  // Note: In a real application, this should be handled server-side
-  console.log('[HF] Using keys from config file');
-  return [];
 }

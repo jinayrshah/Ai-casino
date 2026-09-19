@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { MessageCircle, ArrowLeft, Loader2, AlertCircle, Copy } from 'lucide-react';
+import { MessageCircle, ArrowLeft } from 'lucide-react';
 import { BetAmount } from '../types';
 import BettingPanel from './BettingPanel';
 import ChatInterface from './chat/ChatInterface';
@@ -29,7 +29,8 @@ export default function Round3({ currentChips, onComplete, username }: Round3Pro
   const [showGuess, setShowGuess] = useState(false);
   const [connectionError, setConnectionError] = useState('');
   const [isConnected, setIsConnected] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
+
+
 
   // Handle bet placement
   const handleBet = useCallback((amount: BetAmount) => {
@@ -80,14 +81,14 @@ export default function Round3({ currentChips, onComplete, username }: Round3Pro
 
   // Randomly select AI or Human mode and set up connection
   const selectRandomMode = useCallback(async () => {
-    // Randomly choose between AI and Human (50/50 chance)
-    const randomMode: ChatMode = Math.random() < 0.5 ? 'ai' : 'human';
+    // Randomly choose between AI and Human (70% AI, 30% Human chance)
+    const randomMode: ChatMode = Math.random() < 0.7 ? 'ai' : 'human';
     setActualMode(randomMode);
     setConnectionError('');
     console.log('Selected mode (hidden from player):', randomMode);
 
     if (randomMode === 'human') {
-      setIsLoading(true);
+
       try {
         selectHumanChat();
       } catch (error: unknown) {
@@ -100,7 +101,7 @@ export default function Round3({ currentChips, onComplete, username }: Round3Pro
         reset_conversation();
         setPhase('playing');
       } finally {
-        setIsLoading(false);
+
       }
     } else {
       // AI mode - start immediately
@@ -112,24 +113,17 @@ export default function Round3({ currentChips, onComplete, username }: Round3Pro
   const selectHumanChat = useCallback(async () => {
     setActualMode('human');
     setConnectionError('');
-    setIsLoading(true);
 
     try {
-      // Automatically connect to the WebSocket server on port 8080
-      const hostAddress = 'ws://localhost:8080';
-      console.log('🤖 Auto-connecting to WebSocket server:', hostAddress);
+      if (!network_manager.is_connected()) {
+        // Automatically connect to the WebSocket server
+        const hostAddress = import.meta.env.VITE_WS_URL || `ws://${window.location.hostname}:8080`;
+        console.log(`Connecting to ${hostAddress}...`);
+        network_manager.set_username?.(username || '');
+        await network_manager.connect_to_host(hostAddress);
 
-      network_manager.set_username?.(username || '');
-      await network_manager.connect_to_host(hostAddress);
-
-      // Send player registration message
-      network_manager.send_chat_message(JSON.stringify({
-        type: 'register-player',
-        username: username
-      }));
-
-      console.log('✅ Successfully connected to WebSocket server');
-
+        console.log('✅ Successfully connected to WebSocket server');
+      }
     } catch (error: unknown) {
       console.error('Connection error:', error);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
@@ -138,7 +132,7 @@ export default function Round3({ currentChips, onComplete, username }: Round3Pro
       // Fall back to AI mode (this will be handled by the connection callback)
       console.log('🔄 Human connection failed, connection callback will handle fallback to AI mode');
     } finally {
-      setIsLoading(false);
+
     }
   }, [username]);
 

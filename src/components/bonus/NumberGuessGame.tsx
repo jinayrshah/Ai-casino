@@ -14,7 +14,6 @@ const NumberGuessGame: React.FC<NumberGuessGameProps> = ({
   onSelectBonusBet,
   onChipUpdate,
   selectedBet,
-  result,
   currentChips,
 }) => {
   const [targetNumber, setTargetNumber] = useState<number>(0);
@@ -60,7 +59,7 @@ const NumberGuessGame: React.FC<NumberGuessGameProps> = ({
     if (guess === targetNumber) {
       const winnings = selectedBet * 2;
       setMessage(`Correct! You won $${winnings}!`);
-      onChipUpdate(currentChips + winnings - selectedBet);
+      onChipUpdate(currentChips + winnings);
       setGameOver(true);
     } else if (newAttempts >= maxAttempts) {
       setMessage(`Game Over! The number was ${targetNumber}`);

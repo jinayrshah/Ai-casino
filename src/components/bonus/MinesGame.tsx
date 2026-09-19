@@ -16,7 +16,7 @@ interface Cell {
   content: string;
 }
 
-const MinesGame: React.FC<MinesGameProps> = ({ onBack, onSelectBonusBet, onChipUpdate, selectedBet, result, currentChips }) => {
+const MinesGame: React.FC<MinesGameProps> = ({ onBack, onSelectBonusBet, onChipUpdate, selectedBet, currentChips }) => {
   const [minesGrid, setMinesGrid] = useState<Cell[]>([]);
   const [mines, setMines] = useState<number[]>([]);
   const [gameOver, setGameOver] = useState(false);
@@ -32,7 +32,7 @@ const MinesGame: React.FC<MinesGameProps> = ({ onBack, onSelectBonusBet, onChipU
 
   const initGame = () => {
     const gridSize = 25;
-    const mineCount = 5;
+    const mineCount = 2; // Lowered from 5 to 2 so wipeouts are less common
     const newMines: number[] = [];
 
     // Place mines randomly

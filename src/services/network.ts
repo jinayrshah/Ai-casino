@@ -4,7 +4,7 @@ interface NetworkMessage {
   type: 'chat' | 'connect' | 'connected' | 'disconnect' | 'error' | 
         'player-joined' | 'player-left' | 'player-list' |
         'host-registered' | 'host-available' | 'host-disconnected' |
-        'register-host' | 'player-join';
+        'register-host' | 'player-join' | 'private-message' | 'player-private-message';
   content?: string;
   message?: string;
   timestamp: number;
@@ -15,6 +15,7 @@ interface NetworkMessage {
   recipientId?: string;
   isPrivate?: boolean;
   players?: string[];
+  targetPlayerId?: string;
 }
 
 type MessageCallback = (message: NetworkMessage) => void;
@@ -215,7 +216,7 @@ class NetworkManager {
   // Connect as host`
   public async connect_as_host(port: number = 8080): Promise<void> {
     this.isHost = true;
-    this.connectionUrl = `ws://localhost:${port}`;
+    this.connectionUrl = import.meta.env.VITE_WS_URL || `ws://${window.location.hostname}:${port}`;
     
     console.log(`[Network] Starting as host at ${this.connectionUrl}`);
     return this.attemptConnection();
@@ -241,7 +242,7 @@ class NetworkManager {
 
   // Start a server (for hosting) - KEEP THIS METHOD
   public async start_server(port: number = this.DEFAULT_PORT, success?: (id: string) => void): Promise<void> {
-    this.connectionUrl = `ws://localhost:${port}`;
+    this.connectionUrl = `ws://${window.location.hostname}:${port}`;
     this.isHost = true;
     
     console.log(`[Network] Starting server on: ${this.connectionUrl}`);
@@ -287,6 +288,43 @@ class NetworkManager {
     };
     
     console.log('[Network] Sending message:', message);
+    this.ws.send(JSON.stringify(message));
+  }
+
+  // Send a private message to the host
+  public send_private_message_to_host(content: string): void {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      console.error('[Network] Cannot send private message to host: WebSocket not connected');
+      return;
+    }
+    
+    const message: NetworkMessage = {
+      type: 'player-private-message',
+      content,
+      timestamp: Date.now(),
+      senderId: this.localId
+    };
+    
+    console.log('[Network] Sending private message to host:', message);
+    this.ws.send(JSON.stringify(message));
+  }
+
+  // Send a private message to a specific player (host only)
+  public send_private_message_to_player(targetPlayerId: string, content: string): void {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      console.error('[Network] Cannot send private message: WebSocket not connected');
+      return;
+    }
+    
+    const message: NetworkMessage = {
+      type: 'private-message',
+      targetPlayerId: targetPlayerId,
+      content,
+      timestamp: Date.now(),
+      senderId: this.localId
+    };
+    
+    console.log(`[Network] Sending private message to ${targetPlayerId}:`, message);
     this.ws.send(JSON.stringify(message));
   }
 
