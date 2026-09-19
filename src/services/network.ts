@@ -233,6 +233,13 @@ class NetworkManager {
     
     // Parse URL to handle port
     const urlObj = new URL(finalUrl);
+    
+    // If it's a secure websocket (wss), don't force a port unless specified
+    if (urlObj.protocol === 'wss:' || urlObj.hostname !== 'localhost') {
+       return urlObj.toString();
+    }
+    
+    // For localhost testing, default to 8080
     if (!urlObj.port) {
       urlObj.port = defaultPort.toString();
     }
