@@ -161,6 +161,28 @@ app.get('/api/generate-pollinations', async (req, res) => {
   }
 });
 
+// Proxy Pollinations Text to bypass browser CORS and AdBlockers
+app.get('/api/chat-pollinations', async (req, res) => {
+  try {
+    const { prompt } = req.query;
+    if (!prompt) return res.status(400).send('Prompt is required');
+    
+    const encodedPrompt = encodeURIComponent(prompt);
+    const url = `https://text.pollinations.ai/${encodedPrompt}?model=openai`;
+    
+    const response = await fetch(url);
+    if (!response.ok) {
+      return res.status(response.status).send(`Pollinations API error: ${response.statusText}`);
+    }
+    
+    const text = await response.text();
+    res.send(text);
+  } catch (err) {
+    console.error('Pollinations text proxy error:', err);
+    res.status(500).send('Proxy error');
+  }
+});
+
 let hfKeyIndex = 0;
 // Proxy HuggingFace to bypass browser AdBlockers
 app.post('/api/generate-huggingface', async (req, res) => {
@@ -238,17 +260,20 @@ wss.on('connection', (ws) => {
       switch (data.type) {
         case 'register-host':
           if (host && host !== ws) {
-            ws.send(JSON.stringify({
-              type: 'error',
-              message: 'Another host is already registered',
-              timestamp: Date.now()
-            }));
-            return;
+            console.log('Overriding existing host connection');
+            try {
+              host.send(JSON.stringify({
+                type: 'error',
+                message: 'You have been replaced by a new host connection',
+                timestamp: Date.now()
+              }));
+              host.close();
+            } catch (e) {}
           }
-          if (!host) {
-            host = ws;
-            ws.isHost = true;
-            console.log(`Host registered: ${ws.clientId}`);
+          
+          host = ws;
+          ws.isHost = true;
+          console.log(`Host registered: ${ws.clientId}`);
             
             broadcastToPlayers({ type: 'host-available', timestamp: Date.now() });
             

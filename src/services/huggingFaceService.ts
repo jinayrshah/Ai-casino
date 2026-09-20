@@ -116,12 +116,14 @@ async function generateWithHuggingFace(prompt: string): Promise<string> {
   hfKeyIndex++;
 
   // Hugging Face has been deprecating free tier models rapidly today.
-  // We will loop through a list of fallback models.
+  // We will loop through a list of fallback models that are typically available on the free tier.
   const models = [
+    'prompthero/openjourney',
+    'stabilityai/stable-diffusion-2-1',
     'stabilityai/stable-diffusion-xl-base-1.0',
-    'black-forest-labs/FLUX.1-schnell',
     'CompVis/stable-diffusion-v1-4',
-    'runwayml/stable-diffusion-v1-5'
+    'runwayml/stable-diffusion-v1-5',
+    'SG161222/Realistic_Vision_V1.4'
   ];
 
   let lastError = '';

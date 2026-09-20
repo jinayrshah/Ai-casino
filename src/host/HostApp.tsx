@@ -147,7 +147,7 @@ export default function HostApp() {
     setIsLoading(true);
     network_manager.connection_callback = handleConnection;
     network_manager.message_callback = handleMessage;
-    network_manager.connect_to_host(import.meta.env.VITE_WS_URL || `ws://${window.location.hostname}:8080`);
+    network_manager.connect_as_host(import.meta.env.VITE_WS_URL || `ws://${window.location.hostname}:8080`);
 
     return () => {
       network_manager.disconnect();
@@ -193,15 +193,7 @@ export default function HostApp() {
     }));
     
     // Send via network (Private message)
-    const ws = (network_manager as any).ws;
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({
-        type: 'private-message',
-        targetPlayerId: activePlayerId,
-        content: input,
-        timestamp: Date.now()
-      }));
-    }
+    network_manager.send_private_message_to_player(activePlayerId, input);
     
     setInput('');
   };

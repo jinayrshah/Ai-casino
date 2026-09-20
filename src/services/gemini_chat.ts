@@ -154,9 +154,9 @@ The user just said: '${message}'`;
       console.warn('Puter failed:', e);
     }
     
-    // Tier 2: Pollinations
+    // Tier 2: Pollinations Client-Side
     try {
-      console.log('Attempting Pollinations...');
+      console.log('Attempting Pollinations Client-Side...');
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 5000); // 5s timeout
       
@@ -170,18 +170,46 @@ The user just said: '${message}'`;
           const isErrorResponse = aiText.includes('Queue full') || aiText.includes("doesn't have enough credits");
           
           if (aiText && !isErrorResponse) {
-            console.log('Received response from Pollinations:', aiText);
+            console.log('Received response from Pollinations Client-Side:', aiText);
             return finalizeResponse(aiText);
           } else {
-             console.warn('Pollinations returned an error text:', aiText);
+             console.warn('Pollinations Client-Side returned an error text:', aiText);
              throw new Error('Pollinations API out of credits');
           }
       }
     } catch (e) {
-        console.warn('Pollinations failed:', e);
+        console.warn('Pollinations Client-Side failed:', e);
+    }
+    
+    // Tier 3: Pollinations Backend
+    try {
+      console.log('Attempting Pollinations Backend...');
+      const baseUrl = import.meta.env.VITE_BACKEND_URL || `http://${window.location.hostname}:8080`;
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 8000); // 8s timeout
+      
+      const response = await fetch(`${baseUrl}/api/chat-pollinations?prompt=${encodeURIComponent(pollinationsPrompt)}`, {
+          signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+      
+      if (response.ok) {
+          aiText = await response.text();
+          const isErrorResponse = aiText.includes('Queue full') || aiText.includes("doesn't have enough credits");
+          
+          if (aiText && !isErrorResponse) {
+            console.log('Received response from Pollinations Backend:', aiText);
+            return finalizeResponse(aiText);
+          } else {
+             console.warn('Pollinations Backend returned an error text:', aiText);
+             throw new Error('Pollinations API out of credits');
+          }
+      }
+    } catch (e) {
+        console.warn('Pollinations Backend failed:', e);
     }
 
-    // Tier 3: Gemini
+    // Tier 4: Gemini
     try {
       console.log('Attempting Gemini...');
       if (genAI) {
@@ -205,7 +233,7 @@ The user just said: '${message}'`;
         console.warn('Gemini failed:', e);
     }
     
-    // Tier 4: Groq
+    // Tier 5: Groq
     try {
         console.log('Attempting Groq...');
         aiText = await callGroqAPI(systemPrompt, userPrompt);
