@@ -102,7 +102,8 @@ async function generateWithHuggingFace(prompt: string): Promise<string> {
   hfKeyIndex++;
 
   const model = 'black-forest-labs/FLUX.1-schnell';
-  const url = `https://api-inference.huggingface.co/models/${model}`;
+  // Use router.huggingface.co to bypass Indian ISP DNS blocks on api-inference.huggingface.co
+  const url = `https://router.huggingface.co/hf-inference/models/${model}`;
   
   const response = await fetch(url, {
     method: 'POST',
