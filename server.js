@@ -288,10 +288,7 @@ wss.on('connection', (ws) => {
                 timestamp: Date.now()
               }));
             }
-          }
           break;
-          
-
           
         case 'player-join':
           if (ws.isHost) break;
