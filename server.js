@@ -203,7 +203,7 @@ app.post('/api/generate-huggingface', async (req, res) => {
     res.send(Buffer.from(buffer));
   } catch (err) {
     console.error('HuggingFace proxy error:', err);
-    res.status(500).json({ error: 'Proxy error' });
+    res.status(500).json({ error: 'Proxy error', details: err.message, stack: err.stack });
   }
 });
 
