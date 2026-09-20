@@ -85,43 +85,17 @@ async function generateWithPollinations(prompt: string): Promise<string> {
   return URL.createObjectURL(blob);
 }
 
-let hfKeyIndex = 0;
-// 3. Hugging Face (Client-side direct to bypass Render DNS block)
+// 3. Hugging Face / Tier 2 (Now mapped directly to Pollinations client-side for 100% reliability)
 async function generateWithHuggingFace(prompt: string): Promise<string> {
-  const keys = [
-    import.meta.env.VITE_HF_API_KEY_1,
-    import.meta.env.VITE_HF_API_KEY_2,
-    import.meta.env.VITE_HF_API_KEY_3,
-  ].filter(Boolean);
-
-  if (keys.length === 0) {
-    throw new Error('No HuggingFace keys configured on client');
-  }
-
-  const key = keys[hfKeyIndex % keys.length];
-  hfKeyIndex++;
-
-  // Use SDXL as it is stable and supported on the free Inference API
-  const model = 'stabilityai/stable-diffusion-xl-base-1.0';
-  // Use router.huggingface.co to bypass Indian ISP DNS blocks on api-inference.huggingface.co
-  const url = `https://router.huggingface.co/hf-inference/models/${model}`;
+  // We use Pollinations client-side because Hugging Face is constantly returning 410 on free tier
+  // and we need to guarantee success for the college network.
+  const seed = Math.floor(Math.random() * 1000000);
+  const encodedPrompt = encodeURIComponent(prompt);
+  const url = `https://image.pollinations.ai/prompt/${encodedPrompt}?seed=${seed}&nologo=true&model=turbo`;
   
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${key}`
-    },
-    body: JSON.stringify({ inputs: prompt }),
-  });
-
+  const response = await fetch(url);
   if (!response.ok) {
-    let errorText = response.statusText;
-    try {
-      const errJson = await response.json();
-      errorText = errJson.error || errorText;
-    } catch (e) {}
-    throw new Error(`Hugging Face API error: ${errorText}`);
+    throw new Error(`Pollinations Client-side error: ${response.statusText}`);
   }
 
   const blob = await response.blob();
