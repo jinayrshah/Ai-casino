@@ -146,19 +146,19 @@ export async function generateImage(prompt: string, imageId?: number): Promise<G
   }
 
   try {
-    console.log(`[ImageGen] Tier 2: Trying Pollinations...`);
-    const imageUrl = await withTimeout(generateWithPollinations(prompt), 20000);
-    return { data: imageUrl, prompt };
-  } catch (error) {
-    console.warn(`[ImageGen] Tier 2 Pollinations failed:`, error);
-  }
-
-  try {
-    console.log(`[ImageGen] Tier 3: Trying Hugging Face...`);
+    console.log(`[ImageGen] Tier 2: Trying Hugging Face...`);
     const imageUrl = await withTimeout(generateWithHuggingFace(prompt), 15000);
     return { data: imageUrl, prompt };
   } catch (error) {
-    console.warn(`[ImageGen] Tier 3 Hugging Face failed:`, error);
+    console.warn(`[ImageGen] Tier 2 Hugging Face failed:`, error);
+  }
+
+  try {
+    console.log(`[ImageGen] Tier 3: Trying Pollinations...`);
+    const imageUrl = await withTimeout(generateWithPollinations(prompt), 20000);
+    return { data: imageUrl, prompt };
+  } catch (error) {
+    console.warn(`[ImageGen] Tier 3 Pollinations failed:`, error);
   }
 
   try {
