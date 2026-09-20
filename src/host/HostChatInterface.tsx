@@ -29,17 +29,6 @@ export default function HostChatInterface() {
   useEffect(() => {
     // Set up as host
     network_manager.connection_callback = (connected, message) => {
-      if (connected) {
-        const registerMsg = {
-          type: 'register-host',
-          clientId: network_manager.get_local_id?.(),
-          timestamp: Date.now()
-        };
-        const ws = (network_manager as any).ws;
-        if (ws && ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify(registerMsg));
-        }
-      }
       // System message
       addSystemMessage(connected ? 'Connected to Turing Test server' : message);
     };
@@ -116,12 +105,7 @@ export default function HostChatInterface() {
 
     // Connect as host
     const hostAddress = import.meta.env.VITE_WS_URL || `ws://${window.location.hostname}:8080`;
-    network_manager.connect_to_host(hostAddress).then(() => {
-      // Register as host
-      network_manager.send_chat_message(JSON.stringify({
-        type: 'register-host'
-      }));
-    });
+    network_manager.connect_as_host(hostAddress);
 
     return () => {
       network_manager.disconnect();
@@ -163,7 +147,13 @@ export default function HostChatInterface() {
   };
 
   const getMessageDisplayInfo = (msg: ChatMessage) => {
-    if (msg.sender === 'host') {
+    if (msg.sender === 'system') {
+      return {
+        displayName: 'System',
+        badge: '',
+        bgColor: 'bg-gray-800 border border-gray-600'
+      };
+    } else if (msg.sender === 'host') {
       const targetPlayer = msg.targetPlayerId 
         ? players.find(p => p.id === msg.targetPlayerId)
         : null;

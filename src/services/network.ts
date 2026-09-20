@@ -213,12 +213,13 @@ class NetworkManager {
     return this.attemptConnection();
   }
   
-  // Connect as host`
-  public async connect_as_host(port: number = 8080): Promise<void> {
+  // Connect as host
+  public async connect_as_host(url: string): Promise<void> {
     this.isHost = true;
-    this.connectionUrl = import.meta.env.VITE_WS_URL || `ws://${window.location.hostname}:${port}`;
+    let finalUrl = this.normalizeWebSocketUrl(url, this.DEFAULT_PORT);
+    this.connectionUrl = finalUrl;
     
-    console.log(`[Network] Starting as host at ${this.connectionUrl}`);
+    console.log(`[Network] Connecting as host at ${finalUrl}`);
     return this.attemptConnection();
   }
   
