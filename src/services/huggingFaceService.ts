@@ -85,13 +85,32 @@ async function generateWithPollinations(prompt: string): Promise<string> {
   return URL.createObjectURL(blob);
 }
 
-// 3. Hugging Face (Proxied through backend to bypass AdBlockers)
+let hfKeyIndex = 0;
+// 3. Hugging Face (Client-side direct to bypass Render DNS block)
 async function generateWithHuggingFace(prompt: string): Promise<string> {
-  const baseUrl = import.meta.env.VITE_BACKEND_URL || `http://${window.location.hostname}:8080`;
-  const response = await fetch(`${baseUrl}/api/generate-huggingface`, {
+  const keys = [
+    import.meta.env.VITE_HF_API_KEY_1,
+    import.meta.env.VITE_HF_API_KEY_2,
+    import.meta.env.VITE_HF_API_KEY_3,
+  ].filter(Boolean);
+
+  if (keys.length === 0) {
+    throw new Error('No HuggingFace keys configured on client');
+  }
+
+  const key = keys[hfKeyIndex % keys.length];
+  hfKeyIndex++;
+
+  const model = 'black-forest-labs/FLUX.1-schnell';
+  const url = `https://api-inference.huggingface.co/models/${model}`;
+  
+  const response = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prompt }),
+    headers: { 
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${key}`
+    },
+    body: JSON.stringify({ inputs: prompt }),
   });
 
   if (!response.ok) {
@@ -100,7 +119,7 @@ async function generateWithHuggingFace(prompt: string): Promise<string> {
       const errJson = await response.json();
       errorText = errJson.error || errorText;
     } catch (e) {}
-    throw new Error(`Hugging Face proxy error: ${errorText}`);
+    throw new Error(`Hugging Face API error: ${errorText}`);
   }
 
   const blob = await response.blob();
