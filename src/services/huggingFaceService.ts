@@ -69,40 +69,79 @@ async function generateWithPuter(prompt: string): Promise<string> {
   }
 }
 
-// 2. Pollinations
-async function generateWithPollinations(prompt: string): Promise<string> {
+// 2. Pollinations (Client-Side Direct - Fastest and avoids server rate limits)
+async function generateWithPollinationsClientSide(prompt: string): Promise<string> {
   const encodedPrompt = encodeURIComponent(prompt);
-  // Proxy through our backend to bypass browser CORS (403 Forbidden) on localhost
+  const seed = Math.floor(Math.random() * 1000000);
+  const url = `https://image.pollinations.ai/prompt/${encodedPrompt}?seed=${seed}&nologo=true&model=turbo`;
+  
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Pollinations Client-side error: ${response.status} ${response.statusText}`);
+  }
+
+  const blob = await response.blob();
+  return URL.createObjectURL(blob);
+}
+
+// 3. Pollinations (Backend Proxy)
+async function generateWithPollinationsBackend(prompt: string): Promise<string> {
+  const encodedPrompt = encodeURIComponent(prompt);
   const baseUrl = import.meta.env.VITE_BACKEND_URL || `http://${window.location.hostname}:8080`;
   const url = `${baseUrl}/api/generate-pollinations?prompt=${encodedPrompt}`;
   
   const response = await fetch(url);
   if (!response.ok) {
-    throw new Error(`Pollinations API error: ${response.status} ${response.statusText}`);
+    throw new Error(`Pollinations Backend error: ${response.status} ${response.statusText}`);
   }
   
   const blob = await response.blob();
   return URL.createObjectURL(blob);
 }
 
-// 3. Hugging Face / Tier 2 (Now mapped directly to Pollinations client-side for 100% reliability)
+let hfKeyIndex = 0;
+// 4. Hugging Face (Client-side)
 async function generateWithHuggingFace(prompt: string): Promise<string> {
-  // We use Pollinations client-side because Hugging Face is constantly returning 410 on free tier
-  // and we need to guarantee success for the college network.
-  const seed = Math.floor(Math.random() * 1000000);
-  const encodedPrompt = encodeURIComponent(prompt);
-  const url = `https://image.pollinations.ai/prompt/${encodedPrompt}?seed=${seed}&nologo=true&model=turbo`;
+  const keys = [
+    import.meta.env.VITE_HF_API_KEY_1,
+    import.meta.env.VITE_HF_API_KEY_2,
+    import.meta.env.VITE_HF_API_KEY_3,
+  ].filter(Boolean);
+
+  if (keys.length === 0) {
+    throw new Error('No HuggingFace keys configured on client');
+  }
+
+  const key = keys[hfKeyIndex % keys.length];
+  hfKeyIndex++;
+
+  // Using a highly stable, older model that is guaranteed to be on the free tier
+  const model = 'runwayml/stable-diffusion-v1-5';
+  const url = `https://router.huggingface.co/hf-inference/models/${model}`;
   
-  const response = await fetch(url);
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${key}`
+    },
+    body: JSON.stringify({ inputs: prompt }),
+  });
+
   if (!response.ok) {
-    throw new Error(`Pollinations Client-side error: ${response.statusText}`);
+    let errorText = response.statusText;
+    try {
+      const errJson = await response.json();
+      errorText = errJson.error || errorText;
+    } catch (e) {}
+    throw new Error(`Hugging Face API error (Status ${response.status}): ${errorText}`);
   }
 
   const blob = await response.blob();
   return URL.createObjectURL(blob);
 }
 
-// 4. Hardcoded Fallbacks
+// 5. Hardcoded Fallbacks
 function getHardcodedFallback(imageId?: number): string {
   if (imageId && imageId >= 1 && imageId <= 5) {
     return `/fallback-images/image${imageId}.jpg`;
@@ -115,7 +154,7 @@ function getHardcodedFallback(imageId?: number): string {
   return fallbacks[Math.floor(Math.random() * fallbacks.length)];
 }
 
-// 5. SVG Fallback
+// 6. SVG Fallback
 function createFallbackSVG(): string {
   const svg = `
     <svg width="500" height="300" xmlns="http://www.w3.org/2000/svg">
@@ -141,29 +180,37 @@ export async function generateImage(prompt: string, imageId?: number): Promise<G
   }
 
   try {
-    console.log(`[ImageGen] Tier 2: Trying Hugging Face...`);
-    const imageUrl = await withTimeout(generateWithHuggingFace(prompt), 15000);
+    console.log(`[ImageGen] Tier 2: Trying Pollinations Client-Side...`);
+    const imageUrl = await withTimeout(generateWithPollinationsClientSide(prompt), 15000);
     return { data: imageUrl, prompt };
   } catch (error) {
-    console.warn(`[ImageGen] Tier 2 Hugging Face failed:`, error);
+    console.warn(`[ImageGen] Tier 2 Pollinations Client-Side failed:`, error);
   }
 
   try {
-    console.log(`[ImageGen] Tier 3: Trying Pollinations...`);
-    const imageUrl = await withTimeout(generateWithPollinations(prompt), 20000);
+    console.log(`[ImageGen] Tier 3: Trying Pollinations Backend...`);
+    const imageUrl = await withTimeout(generateWithPollinationsBackend(prompt), 20000);
     return { data: imageUrl, prompt };
   } catch (error) {
-    console.warn(`[ImageGen] Tier 3 Pollinations failed:`, error);
+    console.warn(`[ImageGen] Tier 3 Pollinations Backend failed:`, error);
   }
 
   try {
-    console.log(`[ImageGen] Tier 4: Using Hardcoded fallback`);
+    console.log(`[ImageGen] Tier 4: Trying Hugging Face...`);
+    const imageUrl = await withTimeout(generateWithHuggingFace(prompt), 20000);
+    return { data: imageUrl, prompt };
+  } catch (error) {
+    console.warn(`[ImageGen] Tier 4 Hugging Face failed:`, error);
+  }
+
+  try {
+    console.log(`[ImageGen] Tier 5: Using Hardcoded fallback`);
     return { data: getHardcodedFallback(imageId), prompt };
   } catch (error) {
-    console.warn(`[ImageGen] Tier 4 Hardcoded failed:`, error);
+    console.warn(`[ImageGen] Tier 5 Hardcoded failed:`, error);
   }
 
-  console.log(`[ImageGen] Tier 5: Using SVG placeholder`);
+  console.log(`[ImageGen] Tier 6: Using SVG placeholder`);
   return { data: createFallbackSVG(), prompt };
 }
 
