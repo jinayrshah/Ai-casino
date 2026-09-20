@@ -82,8 +82,7 @@ export default function Round3({ currentChips, onComplete, username }: Round3Pro
   // Randomly select AI or Human mode and set up connection
   const selectRandomMode = useCallback(async () => {
     // Randomly choose between AI and Human (70% AI, 30% Human chance)
-    // TEMPORARILY FORCED TO 100% HUMAN FOR TESTING
-    const randomMode: ChatMode = 'human'; // Math.random() < 0.7 ? 'ai' : 'human';
+    const randomMode: ChatMode = Math.random() < 0.7 ? 'ai' : 'human';
     setActualMode(randomMode);
     setConnectionError('');
     console.log('Selected mode (hidden from player):', randomMode);
