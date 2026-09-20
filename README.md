@@ -5,6 +5,7 @@ An interactive, futuristic casino-style game that tests your ability to distingu
 ## 🔗 Live Links
 
 - **Main Game (Player Interface):** [https://ai-casino-chi.vercel.app](https://ai-casino-chi.vercel.app)
+- **Operator Setup (Puter Auth):** [https://ai-casino-chi.vercel.app/operator-setup](https://ai-casino-chi.vercel.app/operator-setup) *(Run this once before the event to sign into Puter)*
 - **Host Dashboard:** [https://ai-casino-chi.vercel.app/host](https://ai-casino-chi.vercel.app/host)
 - **Backend WebSocket Server:** [https://ai-casino.onrender.com](https://ai-casino.onrender.com)
 
