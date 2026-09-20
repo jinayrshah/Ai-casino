@@ -115,30 +115,49 @@ async function generateWithHuggingFace(prompt: string): Promise<string> {
   const key = keys[hfKeyIndex % keys.length];
   hfKeyIndex++;
 
-  // Using a highly stable, older model that is guaranteed to be on the free tier
-  const model = 'runwayml/stable-diffusion-v1-5';
-  const url = `https://router.huggingface.co/hf-inference/models/${model}`;
-  
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${key}`
-    },
-    body: JSON.stringify({ inputs: prompt }),
-  });
+  // Hugging Face has been deprecating free tier models rapidly today.
+  // We will loop through a list of fallback models.
+  const models = [
+    'stabilityai/stable-diffusion-xl-base-1.0',
+    'black-forest-labs/FLUX.1-schnell',
+    'CompVis/stable-diffusion-v1-4',
+    'runwayml/stable-diffusion-v1-5'
+  ];
 
-  if (!response.ok) {
-    let errorText = response.statusText;
+  let lastError = '';
+
+  for (const model of models) {
     try {
-      const errJson = await response.json();
-      errorText = errJson.error || errorText;
-    } catch (e) {}
-    throw new Error(`Hugging Face API error (Status ${response.status}): ${errorText}`);
+      const url = `https://router.huggingface.co/hf-inference/models/${model}`;
+      
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${key}`
+        },
+        body: JSON.stringify({ inputs: prompt }),
+      });
+
+      if (!response.ok) {
+        let errorText = response.statusText;
+        try {
+          const errJson = await response.json();
+          errorText = errJson.error || errorText;
+        } catch (e) {}
+        throw new Error(`Status ${response.status}: ${errorText}`);
+      }
+
+      const blob = await response.blob();
+      return URL.createObjectURL(blob);
+    } catch (e: any) {
+      console.warn(`[ImageGen] HF Model ${model} failed:`, e.message);
+      lastError = e.message;
+      // Continue to next model
+    }
   }
 
-  const blob = await response.blob();
-  return URL.createObjectURL(blob);
+  throw new Error(`All HF models failed. Last error: ${lastError}`);
 }
 
 // 5. Hardcoded Fallbacks
