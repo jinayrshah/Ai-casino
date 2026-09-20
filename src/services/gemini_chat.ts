@@ -167,9 +167,14 @@ The user just said: '${message}'`;
       
       if (response.ok) {
           aiText = await response.text();
-          if (aiText && !aiText.includes('Queue full')) {
+          const isErrorResponse = aiText.includes('Queue full') || aiText.includes("doesn't have enough credits");
+          
+          if (aiText && !isErrorResponse) {
             console.log('Received response from Pollinations:', aiText);
             return finalizeResponse(aiText);
+          } else {
+             console.warn('Pollinations returned an error text:', aiText);
+             throw new Error('Pollinations API out of credits');
           }
       }
     } catch (e) {
