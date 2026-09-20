@@ -154,19 +154,7 @@ export default function ChatInterface({ mode, onComplete, timeLimit, onTimeUp, m
         }
       };
 
-      // Connect to the host
-      const hostUrl = window.location.hostname;
-      console.log(`Connecting to host at: ${hostUrl}`);
-
-      network_manager.connect_to_host(hostUrl).catch((error: Error) => {
-        console.error('Failed to connect to host:', error);
-        setMessages(prev => [...prev, {
-          id: generateMessageId(),
-          text: `Failed to connect to host: ${error.message}`,
-          sender: 'system',
-          timestamp: new Date()
-        }]);
-      });
+      // We are already connected via Round3.tsx, so no need to call connect_to_host again here!
     }
 
     // Clean up
