@@ -101,7 +101,8 @@ async function generateWithHuggingFace(prompt: string): Promise<string> {
   const key = keys[hfKeyIndex % keys.length];
   hfKeyIndex++;
 
-  const model = 'black-forest-labs/FLUX.1-schnell';
+  // Use SDXL as it is stable and supported on the free Inference API
+  const model = 'stabilityai/stable-diffusion-xl-base-1.0';
   // Use router.huggingface.co to bypass Indian ISP DNS blocks on api-inference.huggingface.co
   const url = `https://router.huggingface.co/hf-inference/models/${model}`;
   
